@@ -1,0 +1,22 @@
+# Lightweight requirements for Render deployment
+# This removes local ML dependencies since we use RunPod for TTS
+
+# Core System Dependencies
+runpod>=1.6.0
+psutil>=5.9.0
+
+# Story Narrator & LLM Dependencies
+google-generativeai>=0.8.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Web Interface
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart
+
+# Additional Utilities
+requests>=2.31.0
+pyyaml>=6.0
