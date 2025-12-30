@@ -1,11 +1,8 @@
 #!/bin/bash
 # Render startup script
 
-# Add src directory to PYTHONPATH so imports work correctly
-export PYTHONPATH="${PYTHONPATH}:${PWD}/src"
+# Set PYTHONPATH to current directory so 'src' package is found
+export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
-# Change to the src directory where api module lives
-cd src || exit 1
-
-# Run uvicorn from src directory with explicit PYTHONPATH
-exec python -m uvicorn api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+# Run uvicorn from root directory using full module path
+exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
