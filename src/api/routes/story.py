@@ -16,8 +16,8 @@ from ..models.story import (
     RepromptRequest,
     RepromptResponse,
 )
-from story_narrator.story_generator import StoryGenerator
-from database.story_service import StoryService
+from ...story_narrator.story_generator import StoryGenerator
+from ...database.story_service import StoryService
 
 logger = logging.getLogger(__name__)
 
