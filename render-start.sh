@@ -2,6 +2,6 @@
 # Render start script
 set -o errexit
 
-# Render already sets working dir to /opt/render/project/src/
-# So we're already in the right place - just run uvicorn
-exec python -m uvicorn api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+# Render sets working dir to /opt/render/project/src/
+# The src code is in src/ subdirectory, so we use src.api.main:app
+exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
