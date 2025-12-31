@@ -149,11 +149,23 @@ async def generate_audio_task(task_id: str, request: TTSGenerateRequest):
 
         # Get voice sample path from voice ID or base64
         voice_sample_path = None
+        voice_samples_dir = Path("src/output/voice_samples")
+
         if request.voiceSample:
+            # Check if it's the default voice
+            if request.voiceSample == "default":
+                # Use the first available voice sample as default
+                voice_files = list(voice_samples_dir.glob("*.wav"))
+                if voice_files:
+                    voice_sample_path = voice_files[0]
+                    tasks[task_id]["progress"] = 20
+                else:
+                    tasks[task_id]["status"] = "failed"
+                    tasks[task_id]["error"] = "No voice samples available. Please upload a voice sample first."
+                    return
             # Check if it's a voice ID (UUID format) or base64 data
-            if len(request.voiceSample) < 100:  # Likely a voice ID
+            elif len(request.voiceSample) < 100:  # Likely a voice ID
                 # Look up the voice file from voice samples directory
-                voice_samples_dir = Path("src/output/voice_samples")
                 voice_files = list(voice_samples_dir.glob(f"{request.voiceSample}.*"))
                 if voice_files:
                     voice_sample_path = voice_files[0]
@@ -176,11 +188,15 @@ async def generate_audio_task(task_id: str, request: TTSGenerateRequest):
                     tasks[task_id]["error"] = f"Failed to decode voice sample: {str(e)}"
                     return
 
-        # Verify voice sample
+        # If no voice sample provided, use default
         if not voice_sample_path:
-            tasks[task_id]["status"] = "failed"
-            tasks[task_id]["error"] = "Voice sample is required for TTS generation"
-            return
+            voice_files = list(voice_samples_dir.glob("*.wav"))
+            if voice_files:
+                voice_sample_path = voice_files[0]
+            else:
+                tasks[task_id]["status"] = "failed"
+                tasks[task_id]["error"] = "No voice samples available. Please upload a voice sample first."
+                return
 
         tasks[task_id]["progress"] = 30
 

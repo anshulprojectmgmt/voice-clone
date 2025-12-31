@@ -23,6 +23,18 @@ voice_library: List[VoiceLibraryItem] = []
 VOICE_SAMPLES_DIR = Path("src/output/voice_samples")
 VOICE_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Default voice ID
+DEFAULT_VOICE_ID = "default"
+
+
+def get_default_voice_path() -> Path:
+    """Get path to default voice sample"""
+    # Use the first available voice sample as default, or None if no samples exist
+    voice_files = list(VOICE_SAMPLES_DIR.glob("*.wav"))
+    if voice_files:
+        return voice_files[0]
+    return None
+
 
 @router.post("/upload", response_model=VoiceUploadResponse)
 async def upload_voice_sample(file: UploadFile = File(...)):
@@ -96,6 +108,42 @@ async def get_voice_library():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get voice library: {str(e)}")
+
+
+@router.get("/default", response_model=VoiceUploadResponse)
+async def get_default_voice():
+    """
+    Get the default voice sample information
+    """
+    try:
+        default_path = get_default_voice_path()
+        if not default_path:
+            raise HTTPException(
+                status_code=404,
+                detail="No default voice available. Please upload a voice sample first."
+            )
+
+        # Get audio duration
+        try:
+            import librosa
+            audio, sr = librosa.load(str(default_path), sr=None)
+            duration = librosa.get_duration(y=audio, sr=sr)
+            sample_rate = sr
+        except Exception:
+            duration = 0.0
+            sample_rate = 24000
+
+        return VoiceUploadResponse(
+            voice_id=DEFAULT_VOICE_ID,
+            sample_url=f"/output/voice_samples/{default_path.name}",
+            duration=duration,
+            sample_rate=sample_rate,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get default voice: {str(e)}")
 
 
 @router.delete("/{voice_id}")

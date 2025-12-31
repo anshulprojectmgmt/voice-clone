@@ -13,6 +13,7 @@ export function VoiceUpload({ onVoiceUploaded }: VoiceUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usingDefault, setUsingDefault] = useState(false);
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -22,6 +23,7 @@ export function VoiceUpload({ onVoiceUploaded }: VoiceUploadProps) {
       setUploadedFile(file);
       setError(null);
       setIsUploading(true);
+      setUsingDefault(false);
 
       try {
         const result = await uploadVoiceSample(file);
@@ -34,6 +36,13 @@ export function VoiceUpload({ onVoiceUploaded }: VoiceUploadProps) {
     },
     [onVoiceUploaded]
   );
+
+  const handleUseDefaultVoice = () => {
+    setUploadedFile(null);
+    setError(null);
+    setUsingDefault(true);
+    onVoiceUploaded?.('default', '/output/voice_samples/default.wav');
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -118,17 +127,44 @@ export function VoiceUpload({ onVoiceUploaded }: VoiceUploadProps) {
         </div>
       )}
 
+      {usingDefault && !uploadedFile && (
+        <div className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-center space-x-3">
+            <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                Using default voice
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                System default voice sample
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setUsingDefault(false)}
+          >
+            Remove
+          </Button>
+        </div>
+      )}
+
       {error && (
         <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
           <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
         </div>
       )}
 
-      <div className="flex justify-center">
-        <Button variant="outline" size="sm">
-          Use Default Voice
-        </Button>
-      </div>
+      {!usingDefault && !uploadedFile && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" onClick={handleUseDefaultVoice}>
+            Use Default Voice
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
