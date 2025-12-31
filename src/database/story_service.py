@@ -5,7 +5,7 @@ from typing import List, Optional, Dict
 import uuid
 import json
 from datetime import datetime
-from .connection import get_db
+from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import Story
 
 
@@ -18,6 +18,11 @@ THEME_COLORS = {
     "horror": "#1F2937",
     "romance": "#F472B6",
 }
+
+
+def get_placeholder():
+    """Get SQL parameter placeholder based on database type"""
+    return "%s" if USE_POSTGRES else "?"
 
 
 class StoryService:
@@ -80,9 +85,6 @@ class StoryService:
         Returns:
             Created Story object
         """
-        conn = get_db()
-        cursor = conn.cursor()
-
         # Generate values
         if story_id is None:
             story_id = str(uuid.uuid4())
@@ -93,20 +95,21 @@ class StoryService:
         now = datetime.now().isoformat()
 
         # Insert into database
-        cursor.execute("""
-            INSERT INTO stories (
-                id, title, text, theme, style, tone, length,
+        ph = get_placeholder()
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute(f"""
+                INSERT INTO stories (
+                    id, title, text, theme, style, tone, length,
+                    word_count, thumbnail_color, preview_text,
+                    created_at, updated_at, audio_url, metadata
+                ) VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+            """, (
+                story_id, title, text, theme, style, tone, length,
                 word_count, thumbnail_color, preview_text,
-                created_at, updated_at, audio_url, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            story_id, title, text, theme, style, tone, length,
-            word_count, thumbnail_color, preview_text,
-            now, now, audio_url, json.dumps(metadata) if metadata else None
-        ))
-
-        conn.commit()
-        conn.close()
+                now, now, audio_url, json.dumps(metadata) if metadata else None
+            ))
+            conn.commit()
 
         # Return created story
         return Story(
@@ -129,12 +132,11 @@ class StoryService:
     @staticmethod
     def get_story(story_id: str) -> Optional[Story]:
         """Get story by ID"""
-        conn = get_db()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM stories WHERE id = ?", (story_id,))
-        row = cursor.fetchone()
-        conn.close()
+        ph = get_placeholder()
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute(f"SELECT * FROM stories WHERE id = {ph}", (story_id,))
+            row = cursor.fetchone()
 
         if row:
             return Story.from_db_row(row)
@@ -159,24 +161,24 @@ class StoryService:
         Returns:
             Dictionary with stories list and total count
         """
-        conn = get_db()
-        cursor = conn.cursor()
+        ph = get_placeholder()
+        with get_db() as conn:
+            cursor = get_cursor(conn)
 
-        # Get total count
-        cursor.execute("SELECT COUNT(*) as count FROM stories")
-        total = cursor.fetchone()['count']
+            # Get total count
+            cursor.execute("SELECT COUNT(*) as count FROM stories")
+            total = cursor.fetchone()['count']
 
-        # Get stories (DISTINCT to prevent duplicates)
-        query = f"""
-            SELECT DISTINCT * FROM stories
-            ORDER BY {sort_by} {order}
-            LIMIT ? OFFSET ?
-        """
-        cursor.execute(query, (limit, offset))
-        rows = cursor.fetchall()
-        conn.close()
+            # Get stories (DISTINCT to prevent duplicates)
+            query = f"""
+                SELECT DISTINCT * FROM stories
+                ORDER BY {sort_by} {order}
+                LIMIT {ph} OFFSET {ph}
+            """
+            cursor.execute(query, (limit, offset))
+            rows = cursor.fetchall()
 
-        stories = [Story.from_db_row(row) for row in rows]
+            stories = [Story.from_db_row(row) for row in rows]
 
         return {
             "stories": [s.to_dict() for s in stories],
@@ -204,44 +206,42 @@ class StoryService:
         Returns:
             Updated Story object or None if not found
         """
-        conn = get_db()
-        cursor = conn.cursor()
-
         # Get existing story
         story = StoryService.get_story(story_id)
         if not story:
-            conn.close()
             return None
 
         # Build update query
         updates = []
         params = []
+        ph = get_placeholder()
 
         if text is not None:
-            updates.append("text = ?")
+            updates.append(f"text = {ph}")
             params.append(text)
-            updates.append("word_count = ?")
+            updates.append(f"word_count = {ph}")
             params.append(len(text.split()))
-            updates.append("preview_text = ?")
+            updates.append(f"preview_text = {ph}")
             params.append(StoryService.generate_preview(text))
 
         if audio_url is not None:
-            updates.append("audio_url = ?")
+            updates.append(f"audio_url = {ph}")
             params.append(audio_url)
 
         if metadata is not None:
-            updates.append("metadata = ?")
+            updates.append(f"metadata = {ph}")
             params.append(json.dumps(metadata))
 
-        updates.append("updated_at = ?")
+        updates.append(f"updated_at = {ph}")
         params.append(datetime.now().isoformat())
 
         params.append(story_id)
 
-        query = f"UPDATE stories SET {', '.join(updates)} WHERE id = ?"
-        cursor.execute(query, params)
-        conn.commit()
-        conn.close()
+        query = f"UPDATE stories SET {', '.join(updates)} WHERE id = {ph}"
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute(query, params)
+            conn.commit()
 
         # Return updated story
         return StoryService.get_story(story_id)
@@ -257,13 +257,11 @@ class StoryService:
         Returns:
             True if deleted, False if not found
         """
-        conn = get_db()
-        cursor = conn.cursor()
-
-        cursor.execute("DELETE FROM stories WHERE id = ?", (story_id,))
-        deleted = cursor.rowcount > 0
-
-        conn.commit()
-        conn.close()
+        ph = get_placeholder()
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute(f"DELETE FROM stories WHERE id = {ph}", (story_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
 
         return deleted
