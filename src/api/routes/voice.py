@@ -7,7 +7,6 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 import shutil
-import librosa
 
 from ..models.voice import (
     VoiceUploadResponse,
@@ -52,6 +51,7 @@ async def upload_voice_sample(file: UploadFile = File(...)):
 
         # Get audio duration and sample rate
         try:
+            import librosa
             audio, sr = librosa.load(str(file_path), sr=None)
             duration = librosa.get_duration(y=audio, sr=sr)
             sample_rate = sr
