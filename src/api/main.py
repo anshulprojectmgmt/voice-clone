@@ -27,6 +27,9 @@ app = FastAPI(
 
 # Configure CORS - support both local development and production
 frontend_url = os.getenv("FRONTEND_URL", "").strip()
+environment = os.getenv("ENVIRONMENT", "development")
+
+# Development origins
 allowed_origins = [
     "http://localhost:3000",  # Next.js dev server
     "http://127.0.0.1:3000",
@@ -36,19 +39,30 @@ allowed_origins = [
 
 # Add production frontend URL if set
 if frontend_url:
-    allowed_origins.extend([
-        f"https://{frontend_url}",
-        f"http://{frontend_url}",
-    ])
+    # Handle both with and without protocol
+    if not frontend_url.startswith(('http://', 'https://')):
+        allowed_origins.extend([
+            f"https://{frontend_url}",
+            f"http://{frontend_url}",
+        ])
+    else:
+        allowed_origins.append(frontend_url)
     logger.info(f"Added production frontend URL to CORS: {frontend_url}")
+
+# For production, also allow all .onrender.com domains
+if environment == "production":
+    logger.info("Production mode: allowing .onrender.com origins")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=allowed_origins if environment != "production" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if environment == "production":
+    logger.warning("CORS is set to allow all origins (*) in production. This should be restricted in a real deployment.")
 
 # Mount static files (for serving generated audio and voice samples)
 output_dir = Path("src/output")
