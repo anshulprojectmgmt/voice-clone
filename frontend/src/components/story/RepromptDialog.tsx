@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface RepromptDialogProps {
   storyId: string;
   originalText: string;
@@ -44,7 +46,7 @@ export function RepromptDialog({ storyId, originalText, onClose, onSuccess }: Re
         text_length: originalText.length,
       });
 
-      const response = await fetch('http://localhost:8000/api/v1/story/reprompt', {
+      const response = await fetch(`${API_URL}/api/v1/story/reprompt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
