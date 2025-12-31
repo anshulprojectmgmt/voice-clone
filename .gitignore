@@ -107,7 +107,8 @@ transformers_cache/
 # Generated Outputs
 # ============================================================================
 src/output/
-samples/
+samples/*
+!samples/test_voice.wav
 outputs/
 chatterbox_runpod/samples/
 syn_out/

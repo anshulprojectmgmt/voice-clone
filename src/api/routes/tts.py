@@ -18,6 +18,7 @@ from ..models.tts import (
     TTSStatusResponse,
 )
 from story_narrator.text_processor import TextProcessor
+from .voice import get_default_voice_path
 
 # AudioSynthesizer requires torch - make it optional
 try:
@@ -154,14 +155,13 @@ async def generate_audio_task(task_id: str, request: TTSGenerateRequest):
         if request.voiceSample:
             # Check if it's the default voice
             if request.voiceSample == "default":
-                # Use the first available voice sample as default
-                voice_files = list(voice_samples_dir.glob("*.wav"))
-                if voice_files:
-                    voice_sample_path = voice_files[0]
+                # Use the default voice (samples/test_voice.wav)
+                voice_sample_path = get_default_voice_path()
+                if voice_sample_path:
                     tasks[task_id]["progress"] = 20
                 else:
                     tasks[task_id]["status"] = "failed"
-                    tasks[task_id]["error"] = "No voice samples available. Please upload a voice sample first."
+                    tasks[task_id]["error"] = "No default voice available. Please upload a voice sample first."
                     return
             # Check if it's a voice ID (UUID format) or base64 data
             elif len(request.voiceSample) < 100:  # Likely a voice ID
@@ -190,10 +190,8 @@ async def generate_audio_task(task_id: str, request: TTSGenerateRequest):
 
         # If no voice sample provided, use default
         if not voice_sample_path:
-            voice_files = list(voice_samples_dir.glob("*.wav"))
-            if voice_files:
-                voice_sample_path = voice_files[0]
-            else:
+            voice_sample_path = get_default_voice_path()
+            if not voice_sample_path:
                 tasks[task_id]["status"] = "failed"
                 tasks[task_id]["error"] = "No voice samples available. Please upload a voice sample first."
                 return

@@ -29,7 +29,12 @@ DEFAULT_VOICE_ID = "default"
 
 def get_default_voice_path() -> Path:
     """Get path to default voice sample"""
-    # Use the first available voice sample as default, or None if no samples exist
+    # Use the test_voice.wav from samples directory as default
+    default_voice = Path("samples/test_voice.wav")
+    if default_voice.exists():
+        return default_voice
+
+    # Fallback to first available voice sample if default doesn't exist
     voice_files = list(VOICE_SAMPLES_DIR.glob("*.wav"))
     if voice_files:
         return voice_files[0]
