@@ -29,10 +29,16 @@ DEFAULT_VOICE_ID = "default"
 
 def get_default_voice_path() -> Path:
     """Get path to default voice sample"""
-    # Use the test_voice.wav from samples directory as default
-    default_voice = Path("samples/test_voice.wav")
-    if default_voice.exists():
-        return default_voice
+    # Try multiple paths for the default voice
+    possible_paths = [
+        Path(__file__).parents[3] / "samples" / "test_voice.wav",  # From src/api/routes/voice.py to project root
+        Path("../samples/test_voice.wav"),  # Relative from src/ directory (Render)
+        Path("samples/test_voice.wav"),  # Direct path
+    ]
+
+    for default_voice in possible_paths:
+        if default_voice.exists():
+            return default_voice
 
     # Fallback to first available voice sample if default doesn't exist
     voice_files = list(VOICE_SAMPLES_DIR.glob("*.wav"))
