@@ -283,8 +283,11 @@ async def generate_audio(request: TTSGenerateRequest, background_tasks: Backgrou
     Generate audio narration for a story
     """
     try:
+        logger.info(f"Received audio generation request for story {request.storyId}")
+
         # Generate unique task ID
         task_id = str(uuid.uuid4())
+        logger.info(f"Generated task ID: {task_id}")
 
         # Initialize task
         tasks[task_id] = {
@@ -296,6 +299,7 @@ async def generate_audio(request: TTSGenerateRequest, background_tasks: Backgrou
 
         # Start background task
         background_tasks.add_task(generate_audio_task, task_id, request)
+        logger.info(f"Background task queued for task {task_id}, returning response")
 
         return TTSGenerateResponse(
             task_id=task_id,

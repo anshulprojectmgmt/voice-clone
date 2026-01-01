@@ -67,34 +67,20 @@ export async function generateAudio(data: {
   temperature: number;
   cfgWeight: number;
 }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+  const response = await fetch(`${API_URL}/api/v1/tts/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
 
-  try {
-    const response = await fetch(`${API_URL}/api/v1/tts/generate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Server error: ${response.status}`);
-    }
-
-    return response.json();
-  } catch (err) {
-    clearTimeout(timeout);
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error('Request timeout - the server took too long to respond');
-    }
-    throw err;
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Server error: ${response.status}`);
   }
+
+  return response.json();
 }
 
 export async function getTaskStatus(taskId: string) {
