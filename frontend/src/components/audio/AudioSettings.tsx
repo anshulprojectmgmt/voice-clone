@@ -8,6 +8,7 @@ import { VoiceUpload } from './VoiceUpload';
 import { AudioPlayer } from './AudioPlayer';
 import { generateAudio, getTaskStatus } from '@/lib/api/client';
 import { useAudioStore } from '@/lib/stores/audioStore';
+import { useKeepAlive } from '@/lib/hooks/useKeepAlive';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -27,6 +28,9 @@ export function AudioSettings({ storyText, storyId }: AudioSettingsProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Keep-alive polling to prevent Render timeout during long TTS operations
+  const { startPolling, stopPolling } = useKeepAlive();
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
@@ -44,6 +48,9 @@ export function AudioSettings({ storyText, storyId }: AudioSettingsProps) {
     setIsGenerating(true);
     setError(null);
     setProgress(0);
+
+    // Start keep-alive polling to prevent Render timeout
+    startPolling();
 
     try {
       const result = await generateAudio({
@@ -73,6 +80,9 @@ export function AudioSettings({ storyText, storyId }: AudioSettingsProps) {
               pollingTimeoutRef.current = null;
             }
 
+            // Stop keep-alive polling
+            stopPolling();
+
             // Prepend backend URL to the audio path
             const fullAudioUrl = status.audio_url?.startsWith('http')
               ? status.audio_url
@@ -85,6 +95,9 @@ export function AudioSettings({ storyText, storyId }: AudioSettingsProps) {
               clearTimeout(pollingTimeoutRef.current);
               pollingTimeoutRef.current = null;
             }
+
+            // Stop keep-alive polling
+            stopPolling();
 
             setError(status.error || 'Audio generation failed');
             setIsGenerating(false);

@@ -2,14 +2,22 @@
 VoiceClone FastAPI Backend
 Main application entry point
 """
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import logging
 import os
+from datetime import datetime
 
-from .routes import story, tts, voice, stories
+from .routes import story, tts, voice, stories, auth
+from ..database.connection import init_db
+from ..database.init_default_voice import init_default_voice
 
 # Configure logging
 logging.basicConfig(
@@ -74,10 +82,49 @@ except Exception as e:
     logger.warning(f"Could not mount output directory: {e}")
 
 # Include routers
+app.include_router(auth.router)  # Authentication routes
 app.include_router(story.router)
 app.include_router(stories.router)  # Dashboard & story management
 app.include_router(tts.router)
 app.include_router(voice.router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Application startup event handler
+
+    Initializes:
+    1. Database schema (creates tables if not exist)
+    2. Default voice pre-caching (eliminates 400-1100ms overhead on first use)
+    """
+    logger.info("=" * 60)
+    logger.info("Application Startup")
+    logger.info("=" * 60)
+
+    # Initialize database
+    logger.info("Initializing database...")
+    try:
+        init_db()
+        logger.info("✓ Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+
+    # Pre-cache default voice
+    logger.info("Pre-caching default voice (this improves first TTS request by 10-20x)...")
+    try:
+        voice = init_default_voice()
+        if voice:
+            logger.info("✓ Default voice pre-cached successfully")
+        else:
+            logger.warning("! Default voice not initialized (will be cached on first use)")
+    except Exception as e:
+        logger.error(f"Failed to pre-cache default voice: {e}")
+        logger.warning("  TTS will still work, but first request will be slower")
+
+    logger.info("=" * 60)
+    logger.info("Startup complete - Ready to accept requests")
+    logger.info("=" * 60)
 
 
 @app.get("/")
@@ -93,11 +140,27 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """
+    Health check endpoint
+
+    Used by Render/monitoring services and frontend keep-alive polling
+    """
     return {
         "status": "healthy",
-        "service": "voiceclone-api"
+        "service": "voiceclone-api",
+        "timestamp": datetime.now().isoformat()
     }
+
+
+@app.get("/ping")
+async def ping():
+    """
+    Lightweight keep-alive endpoint for Render inactivity prevention
+
+    Frontend polls this every 30-40 seconds during long operations
+    to prevent Render from shutting down due to inactivity.
+    """
+    return {"pong": True}
 
 
 if __name__ == "__main__":

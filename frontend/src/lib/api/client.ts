@@ -1,5 +1,20 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Helper to get auth headers from localStorage
+function getAuthHeaders(): HeadersInit {
+  const tokensStr = localStorage.getItem('auth_tokens');
+  if (!tokensStr) return {};
+
+  try {
+    const tokens = JSON.parse(tokensStr);
+    return {
+      'Authorization': `Bearer ${tokens.access_token}`,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export async function generateStory(data: {
   theme: string;
   style: string;
@@ -11,12 +26,14 @@ export async function generateStory(data: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(), // ADDED: Include auth token
     },
     body: JSON.stringify(data),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to generate story');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to generate story');
   }
 
   return response.json();
@@ -27,12 +44,14 @@ export async function updateStory(storyId: string, text: string) {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(), // ADDED: Include auth token
     },
     body: JSON.stringify({ text }),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to update story');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to update story');
   }
 
   return response.json();
@@ -47,12 +66,14 @@ export async function improveStoryWithAI(data: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(), // ADDED: Include auth token
     },
     body: JSON.stringify(data),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to improve story');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to improve story');
   }
 
   return response.json();
@@ -71,6 +92,7 @@ export async function generateAudio(data: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(), // ADDED: Include auth token (optional for TTS)
     },
     body: JSON.stringify(data),
   });
@@ -93,27 +115,93 @@ export async function getTaskStatus(taskId: string) {
   return response.json();
 }
 
-export async function uploadVoiceSample(file: File) {
+export async function uploadVoiceSample(
+  file: File,
+  name?: string,
+  description?: string,
+  exaggeration: number = 0.3,
+  isDefault: boolean = false
+) {
   const formData = new FormData();
   formData.append('file', file);
+  if (name) formData.append('name', name);
+  if (description) formData.append('description', description);
+  formData.append('exaggeration', exaggeration.toString());
+  formData.append('is_default', isDefault.toString());
 
   const response = await fetch(`${API_URL}/api/v1/voice/upload`, {
     method: 'POST',
+    headers: {
+      ...getAuthHeaders(), // ADDED: Include auth token (REQUIRED)
+    },
     body: formData,
   });
 
   if (!response.ok) {
-    throw new Error('Failed to upload voice sample');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to upload voice sample');
   }
 
   return response.json();
 }
 
 export async function getVoiceLibrary() {
-  const response = await fetch(`${API_URL}/api/v1/voice/library`);
+  const response = await fetch(`${API_URL}/api/v1/voice/library`, {
+    headers: {
+      ...getAuthHeaders(), // ADDED: Include auth token (REQUIRED)
+    },
+  });
 
   if (!response.ok) {
-    throw new Error('Failed to get voice library');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to get voice library');
+  }
+
+  return response.json();
+}
+
+export async function getDefaultVoice() {
+  const response = await fetch(`${API_URL}/api/v1/voice/default`, {
+    headers: {
+      ...getAuthHeaders(), // ADDED: Include auth token (optional)
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to get default voice');
+  }
+
+  return response.json();
+}
+
+export async function setDefaultVoice(voiceId: string) {
+  const response = await fetch(`${API_URL}/api/v1/voice/set-default/${voiceId}`, {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(), // ADDED: Include auth token (REQUIRED)
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to set default voice');
+  }
+
+  return response.json();
+}
+
+export async function deleteVoice(voiceId: string) {
+  const response = await fetch(`${API_URL}/api/v1/voice/${voiceId}`, {
+    method: 'DELETE',
+    headers: {
+      ...getAuthHeaders(), // ADDED: Include auth token (REQUIRED)
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to delete voice');
   }
 
   return response.json();

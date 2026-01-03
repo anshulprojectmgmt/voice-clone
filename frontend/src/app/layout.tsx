@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { QueryProvider } from "@/lib/providers/QueryProvider";
+import { AuthProvider } from "@/lib/auth/authContext";
+import { Header } from "@/components/layout/Header";
 
 export const metadata: Metadata = {
   title: "VoiceClone - Story Narrator",
@@ -15,7 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <QueryProvider>{children}</QueryProvider>
+        <AuthProvider>
+          <QueryProvider>
+            <Header />
+            {children}
+          </QueryProvider>
+        </AuthProvider>
       </body>
     </html>
   );

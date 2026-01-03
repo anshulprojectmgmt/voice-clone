@@ -13,7 +13,7 @@ credentials.json
 .render/
 
 # ============================================================================
-# Documentation (detailed explanation - keep internal)
+# Documentation
 # ============================================================================
 PROJECT_EXPLANATION.md
 FRONTEND_PLAN.md
@@ -24,6 +24,13 @@ start_dev.sh
 RUNPOD_DEPLOYMENT.md
 DASHBOARD_PLAN.md
 RENDER_DEPLOYMENT.md
+CHATTERBOX_TECHNICAL_GUIDE.md
+CHATTERBOX_SIMPLE_EXPLANATION.md
+FRONTEND_CHANGES.md
+VOICE_DURATION_OPTIMIZATION.md
+RENDER_KEEPALIVE_SYSTEM.md
+tests
+PRODUCTION_DEPLOYMENT.md
 
 # ============================================================================
 # Python

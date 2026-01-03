@@ -1,7 +1,12 @@
 """
-Story API Routes
+Story API Routes - WITH AUTHENTICATION
+
+All story endpoints require authentication to ensure:
+1. Stories are associated with specific users
+2. Users can only access/modify their own stories
+3. Proper ownership tracking and access control
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict
 import uuid
 from datetime import datetime
@@ -18,6 +23,7 @@ from ..models.story import (
 )
 from story_narrator.story_generator import StoryGenerator
 from database.story_service import StoryService
+from ...auth.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +40,20 @@ def get_story_generator():
 
 
 @router.post("/generate", response_model=StoryGenerateResponse)
-async def generate_story(request: StoryGenerateRequest):
+async def generate_story(request: StoryGenerateRequest, user: dict = Depends(get_current_user)):
     """
     Generate a new story based on user input and save to database
+
+    Requires:
+        - Authentication (Bearer token)
+
+    Returns:
+        Generated story associated with the authenticated user
     """
     try:
+        logger.info(f"Story generation request from user: {user['username']}")
+        logger.info(f"Theme: {request.theme}, Style: {request.style}, Tone: {request.tone}, Length: {request.length}")
+
         generator = get_story_generator()
 
         # Use the convenience method that handles simple parameters
@@ -58,10 +73,11 @@ async def generate_story(request: StoryGenerateRequest):
         # Generate unique story ID
         story_id = str(uuid.uuid4())
 
-        # Save story to database
+        # Save story to database with user association
         try:
             saved_story = StoryService.create_story(
                 story_id=story_id,
+                user_id=user["id"],  # ASSOCIATE WITH USER
                 text=story_text,
                 theme=request.theme,
                 style=request.style,
@@ -73,7 +89,7 @@ async def generate_story(request: StoryGenerateRequest):
                     "provider": result["metadata"]["provider"],
                 }
             )
-            logger.info(f"Story saved to database: {story_id}")
+            logger.info(f"✓ Story saved to database: {story_id} for user {user['username']}")
         except Exception as db_error:
             logger.error(f"Failed to save story to database: {db_error}")
             # Continue anyway - story generation succeeded
@@ -94,17 +110,50 @@ async def generate_story(request: StoryGenerateRequest):
         )
 
     except Exception as e:
+        logger.error(f"Failed to generate story: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate story: {str(e)}")
 
 
 @router.put("/{story_id}/edit")
-async def edit_story(story_id: str, request: StoryEditRequest):
+async def edit_story(story_id: str, request: StoryEditRequest, user: dict = Depends(get_current_user)):
     """
     Update an existing story
+
+    Requires:
+        - Authentication (Bearer token)
+        - Story must belong to authenticated user
+
+    Returns:
+        Updated story information
     """
     try:
-        # In a real app, you would save this to a database
-        # For now, just return success
+        logger.info(f"Story edit request from user {user['username']} for story {story_id}")
+
+        # Verify story ownership
+        story = StoryService.get_story(story_id)
+        if not story:
+            raise HTTPException(
+                status_code=404,
+                detail="Story not found"
+            )
+
+        if story["user_id"] != user["id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: This story belongs to another user"
+            )
+
+        # Update story in database
+        try:
+            StoryService.update_story(story_id=story_id, text=request.text)
+            logger.info(f"✓ Story updated: {story_id}")
+        except Exception as db_error:
+            logger.error(f"Failed to update story in database: {db_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to update story: {str(db_error)}"
+            )
+
         return {
             "story_id": story_id,
             "story_text": request.text,
@@ -112,16 +161,27 @@ async def edit_story(story_id: str, request: StoryEditRequest):
             "updated_at": datetime.now().isoformat(),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Failed to edit story: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to edit story: {str(e)}")
 
 
 @router.post("/ai-improve", response_model=AIImproveResponse)
-async def improve_story_with_ai(request: AIImproveRequest):
+async def improve_story_with_ai(request: AIImproveRequest, user: dict = Depends(get_current_user)):
     """
     Improve a story using AI
+
+    Requires:
+        - Authentication (Bearer token)
+
+    Returns:
+        Original and improved versions of the story
     """
     try:
+        logger.info(f"AI improve request from user {user['username']}, type: {request.improvementType}")
+
         generator = get_story_generator()
 
         # Create improvement prompt based on type
@@ -176,12 +236,36 @@ Write the improved version of the story."""
 
 
 @router.post("/reprompt", response_model=RepromptResponse)
-async def reprompt_story(request: RepromptRequest):
+async def reprompt_story(request: RepromptRequest, user: dict = Depends(get_current_user)):
     """
     Modify an existing story using custom AI instructions.
     Examples: "make it shorter", "add more action", "change ending to be happier"
+
+    Requires:
+        - Authentication (Bearer token)
+        - Story must belong to authenticated user
+
+    Returns:
+        Original and modified versions of the story
     """
     try:
+        logger.info(f"Reprompt request from user {user['username']} for story {request.story_id}")
+        logger.info(f"Instruction: {request.instruction}")
+
+        # Verify story ownership
+        story = StoryService.get_story(request.story_id)
+        if not story:
+            raise HTTPException(
+                status_code=404,
+                detail="Story not found"
+            )
+
+        if story["user_id"] != user["id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: This story belongs to another user"
+            )
+
         generator = get_story_generator()
 
         # Build the AI prompt for story modification
