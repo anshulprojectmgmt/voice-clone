@@ -13,11 +13,10 @@ services:
     name: voiceclone-api
     runtime: python
     plan: free  # WARNING: May fail due to ML dependencies! Upgrade to standard if build fails
-    region: oregon  # Choose your preferred region
+    region: singapore  # Same region as database
     branch: main
-    rootDir: src  # Deploy from src directory to avoid double src/ nesting
-    buildCommand: pip install --upgrade pip && pip install -r ../requirements-render.txt
-    startCommand: python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.12
@@ -42,7 +41,7 @@ services:
     name: voiceclone-frontend
     runtime: node
     plan: free  # Using free tier to reduce costs
-    region: oregon  # Same region as backend for lower latency
+    region: singapore  # Same region as backend for lower latency
     branch: main
     rootDir: frontend
     buildCommand: npm install && npm run build
