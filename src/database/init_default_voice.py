@@ -23,7 +23,7 @@ def init_default_voice() -> Optional['VoiceProfile']:
     This function:
     1. Checks if default voice is already cached
     2. If not, locates the default voice sample file
-    3. Initializes ChatterboxTTS model
+    3. Initializes ChatterboxTTS model (skipped on low-memory environments)
     4. Computes and caches voice embeddings
     5. Stores in database
 
@@ -33,6 +33,14 @@ def init_default_voice() -> Optional['VoiceProfile']:
     from .voice_service import get_default_voice, create_voice_profile
 
     logger.info("Initializing default voice...")
+
+    # Skip TTS model loading on production/Render free tier (512MB RAM limit)
+    # Default voice will be lazy-loaded on first use instead
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment == "production":
+        logger.info("Production environment detected - skipping TTS model loading on startup")
+        logger.info("Default voice will be created on first use to conserve memory")
+        return None
 
     # Check if default voice is already cached
     existing = get_default_voice(SYSTEM_USER_ID)

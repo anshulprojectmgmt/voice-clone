@@ -41,7 +41,7 @@ async def list_stories(
     limit: int = Query(20, ge=1, le=100, description="Number of stories per page"),
     offset: int = Query(0, ge=0, description="Number of stories to skip"),
     sort_by: str = Query("created_at", description="Column to sort by"),
-    order: str = Query("DESC", regex="^(ASC|DESC)$", description="Sort order")
+    order: str = Query("DESC", pattern="^(ASC|DESC)$", description="Sort order")
 ):
     """
     Get list of all stories with pagination

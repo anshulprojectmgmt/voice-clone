@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-from .connection import get_db, get_cursor
+from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import VoiceProfile
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,13 @@ VOICE_EMBEDDINGS_DIR.mkdir(parents=True, exist_ok=True)
 # Voice duration limits
 MAX_VOICE_DURATION = 15.0  # seconds - prevents RunPod timeouts
 MIN_VOICE_DURATION = 3.0   # seconds - minimum for quality cloning
+
+
+def _format_query(query: str) -> str:
+    """Convert SQL query placeholders for PostgreSQL compat if needed"""
+    if USE_POSTGRES:
+        return query.replace('?', '%s')
+    return query
 
 
 def crop_audio_to_limit(audio_path: str, max_duration: float = MAX_VOICE_DURATION) -> str:
@@ -141,24 +148,24 @@ def create_voice_profile(
         if is_default:
             with get_db() as conn:
                 cursor = get_cursor(conn)
-                cursor.execute("""
+                cursor.execute(_format_query("""
                     UPDATE voice_profiles
                     SET is_default = 0
                     WHERE user_id = ?
-                """, (user_id,))
+                """), (user_id,))
                 conn.commit()
 
         # Insert into database
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 INSERT INTO voice_profiles (
                     user_id, voice_id, name, description, file_path, embeddings_path,
                     sample_rate, duration, exaggeration, is_default
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+            """), (
                 user_id, voice_id, name, description, str(new_file_path),
                 str(embeddings_path), int(sr), duration, exaggeration,
                 1 if is_default else 0
@@ -166,7 +173,7 @@ def create_voice_profile(
 
             # Get the created voice profile
             voice_profile_id = cursor.lastrowid
-            cursor.execute("SELECT * FROM voice_profiles WHERE id = ?", (voice_profile_id,))
+            cursor.execute(_format_query("SELECT * FROM voice_profiles WHERE id = ?"), (voice_profile_id,))
             row = cursor.fetchone()
 
             conn.commit()
@@ -268,11 +275,11 @@ def recache_embeddings(voice_id: str, tts_model, new_exaggeration: float) -> boo
         # Update database
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE voice_profiles
                 SET embeddings_path = ?, exaggeration = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE voice_id = ?
-            """, (str(embeddings_path), new_exaggeration, voice_id))
+            """), (str(embeddings_path), new_exaggeration, voice_id))
             conn.commit()
 
         logger.info(f"✓ Embeddings recached for {voice_id}")
@@ -287,7 +294,7 @@ def get_voice_by_id(voice_id: str) -> Optional[VoiceProfile]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT * FROM voice_profiles WHERE voice_id = ?", (voice_id,))
+            cursor.execute(_format_query("SELECT * FROM voice_profiles WHERE voice_id = ?"), (voice_id,))
             row = cursor.fetchone()
 
             if row:
@@ -303,11 +310,11 @@ def get_user_voices(user_id: int) -> List[VoiceProfile]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 SELECT * FROM voice_profiles
                 WHERE user_id = ?
                 ORDER BY created_at DESC
-            """, (user_id,))
+            """), (user_id,))
             rows = cursor.fetchall()
 
             return [VoiceProfile.from_db_row(row) for row in rows]
@@ -321,11 +328,11 @@ def get_default_voice(user_id: int) -> Optional[VoiceProfile]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 SELECT * FROM voice_profiles
                 WHERE user_id = ? AND is_default = 1
                 LIMIT 1
-            """, (user_id,))
+            """), (user_id,))
             row = cursor.fetchone()
 
             if row:
@@ -343,18 +350,18 @@ def set_default_voice(user_id: int, voice_id: str) -> bool:
             cursor = get_cursor(conn)
 
             # Unset current default
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE voice_profiles
                 SET is_default = 0
                 WHERE user_id = ?
-            """, (user_id,))
+            """), (user_id,))
 
             # Set new default
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE voice_profiles
                 SET is_default = 1
                 WHERE user_id = ? AND voice_id = ?
-            """, (user_id, voice_id))
+            """), (user_id, voice_id))
 
             conn.commit()
             return cursor.rowcount > 0
@@ -389,7 +396,7 @@ def delete_voice_profile(voice_id: str, user_id: int) -> bool:
         # Delete from database
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("DELETE FROM voice_profiles WHERE voice_id = ?", (voice_id,))
+            cursor.execute(_format_query("DELETE FROM voice_profiles WHERE voice_id = ?"), (voice_id,))
             conn.commit()
 
             deleted = cursor.rowcount > 0
@@ -406,12 +413,12 @@ def increment_usage(voice_id: str) -> bool:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE voice_profiles
                 SET usage_count = usage_count + 1,
                     last_used = CURRENT_TIMESTAMP
                 WHERE voice_id = ?
-            """, (voice_id,))
+            """), (voice_id,))
             conn.commit()
             return cursor.rowcount > 0
     except Exception as e:
