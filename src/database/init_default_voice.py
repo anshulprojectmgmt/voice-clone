@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from .voice_service import VoiceProfile
+
 logger = logging.getLogger(__name__)
 
 # System user ID for default voices
