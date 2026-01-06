@@ -47,40 +47,52 @@ export function Header() {
               </span>
             </Link>
 
-            {isAuthenticated && (
-              <nav className="hidden md:flex items-center gap-6">
-                <Link
-                  href="/story/create"
-                  className={`text-sm font-medium transition-colors ${
-                    pathname === '/story/create'
-                      ? 'text-purple-600'
-                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                  }`}
+            <nav className="hidden md:flex items-center gap-6">
+              {isAuthenticated ? (
+                <>
+                  <Link
+                    href="/story/create"
+                    className={`text-sm font-medium transition-colors ${
+                      pathname === '/story/create'
+                        ? 'text-purple-600'
+                        : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                    }`}
+                  >
+                    Create Story
+                  </Link>
+                  <Link
+                    href="/voices"
+                    className={`text-sm font-medium transition-colors ${
+                      pathname === '/voices'
+                        ? 'text-purple-600'
+                        : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                    }`}
+                  >
+                    My Voices
+                  </Link>
+                  <Link
+                    href="/"
+                    className={`text-sm font-medium transition-colors ${
+                      pathname === '/'
+                        ? 'text-purple-600'
+                        : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                    }`}
+                  >
+                    Dashboard
+                  </Link>
+                </>
+              ) : (
+                <button
+                  onClick={() => {
+                    console.log('User not authenticated, redirecting to register page');
+                    router.push('/register');
+                  }}
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
                 >
                   Create Story
-                </Link>
-                <Link
-                  href="/voices"
-                  className={`text-sm font-medium transition-colors ${
-                    pathname === '/voices'
-                      ? 'text-purple-600'
-                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                  }`}
-                >
-                  My Voices
-                </Link>
-                <Link
-                  href="/"
-                  className={`text-sm font-medium transition-colors ${
-                    pathname === '/'
-                      ? 'text-purple-600'
-                      : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                  }`}
-                >
-                  Dashboard
-                </Link>
-              </nav>
-            )}
+                </button>
+              )}
+            </nav>
           </div>
 
           {/* User Menu */}

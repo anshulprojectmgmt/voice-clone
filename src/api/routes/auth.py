@@ -52,11 +52,11 @@ async def register(request: RegisterRequest):
     Returns:
         JWT access and refresh tokens
     """
-    logger.info(f"Registration attempt for username: {request.username}")
+    logger.info(f"Registration attempt for username: {request.username}, email: {request.email}")
 
     # Check if username already exists
     if user_exists(username=request.username):
-        logger.warning(f"Username already exists: {request.username}")
+        logger.warning(f"Registration failed - Username already exists: {request.username}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already exists",
@@ -64,45 +64,54 @@ async def register(request: RegisterRequest):
 
     # Check if email already exists
     if user_exists(email=request.email):
-        logger.warning(f"Email already exists: {request.email}")
+        logger.warning(f"Registration failed - Email already exists: {request.email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
 
-    # Hash password
-    password_hash = hash_password(request.password)
+    try:
+        # Hash password
+        logger.debug(f"Hashing password for user: {request.username}")
+        password_hash = hash_password(request.password)
 
-    # Create user
-    user = create_user(
-        username=request.username,
-        email=request.email,
-        password_hash=password_hash,
-    )
-
-    if not user:
-        logger.error(f"Failed to create user: {request.username}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user",
+        # Create user
+        logger.debug(f"Creating user record for: {request.username}")
+        user = create_user(
+            username=request.username,
+            email=request.email,
+            password_hash=password_hash,
         )
 
-    logger.info(f"User created successfully: {user.username} (id={user.id})")
+        if not user:
+            logger.error(f"Failed to create user in database: {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user",
+            )
 
-    # Create tokens
-    token_data = {"sub": str(user.id), "username": user.username}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
+        logger.info(f"User created successfully: {user.username} (id={user.id})")
 
-    # Store refresh token in database
-    store_refresh_token(user.id, refresh_token)
+        # Create tokens
+        logger.debug(f"Generating tokens for user: {user.username}")
+        token_data = {"sub": str(user.id), "username": user.username}
+        access_token = create_access_token(token_data)
+        refresh_token = create_refresh_token(token_data)
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
+        # Store refresh token in database
+        logger.debug(f"Storing refresh token for user: {user.username}")
+        store_refresh_token(user.id, refresh_token)
+
+        logger.info(f"Registration completed successfully for user: {user.username}")
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+    except Exception as e:
+        logger.error(f"Registration error for {request.username}: {str(e)}", exc_info=True)
+        raise
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -115,53 +124,71 @@ async def login(request: LoginRequest):
     """
     logger.info(f"Login attempt for: {request.username}")
 
-    # Get user (try username first, then email)
-    user = get_user_by_username(request.username)
-    if not user:
-        user = get_user_by_email(request.username)
+    try:
+        # Get user (try username first, then email)
+        logger.debug(f"Looking up user: {request.username}")
+        user = get_user_by_username(request.username)
+        if not user:
+            logger.debug(f"Username not found, trying email: {request.username}")
+            user = get_user_by_email(request.username)
 
-    if not user:
-        logger.warning(f"User not found: {request.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+        if not user:
+            logger.warning(f"Login failed - User not found: {request.username}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+            )
+
+        logger.debug(f"User found: {user.username} (id={user.id})")
+
+        # Verify password
+        logger.debug(f"Verifying password for user: {user.username}")
+        if not verify_password(request.password, user.password_hash):
+            logger.warning(f"Login failed - Invalid password for user: {user.username}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+            )
+
+        # Check if user is active
+        if not user.is_active:
+            logger.warning(f"Login failed - Inactive user login attempt: {user.username}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive",
+            )
+
+        # Update last login
+        logger.debug(f"Updating last login for user: {user.username}")
+        update_last_login(user.id)
+
+        logger.info(f"User logged in successfully: {user.username} (id={user.id})")
+
+        # Create tokens
+        logger.debug(f"Generating tokens for user: {user.username}")
+        token_data = {"sub": str(user.id), "username": user.username}
+        access_token = create_access_token(token_data)
+        refresh_token = create_refresh_token(token_data)
+
+        # Store refresh token in database
+        logger.debug(f"Storing refresh token for user: {user.username}")
+        store_refresh_token(user.id, refresh_token)
+
+        logger.info(f"Login completed successfully for user: {user.username}")
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
-
-    # Verify password
-    if not verify_password(request.password, user.password_hash):
-        logger.warning(f"Invalid password for user: {user.username}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error for {request.username}: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during login",
         )
-
-    # Check if user is active
-    if not user.is_active:
-        logger.warning(f"Inactive user login attempt: {user.username}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
-        )
-
-    # Update last login
-    update_last_login(user.id)
-
-    logger.info(f"User logged in successfully: {user.username} (id={user.id})")
-
-    # Create tokens
-    token_data = {"sub": str(user.id), "username": user.username}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
-
-    # Store refresh token in database
-    store_refresh_token(user.id, refresh_token)
-
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
 
 
 @router.post("/refresh", response_model=TokenResponse)

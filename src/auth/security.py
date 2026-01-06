@@ -27,12 +27,24 @@ def hash_password(password: str) -> str:
     """
     Hash a password using bcrypt
 
+    Bcrypt has a maximum password length of 72 bytes. We truncate the password
+    to 72 bytes to avoid errors, as recommended by bcrypt documentation.
+
     Args:
         password: Plain text password
 
     Returns:
         Bcrypt hashed password
     """
+    # Convert to bytes to properly truncate at 72 bytes boundary
+    password_bytes = password.encode('utf-8')
+
+    # Bcrypt can only handle passwords up to 72 bytes
+    if len(password_bytes) > 72:
+        logger.warning(f"Password length ({len(password_bytes)} bytes) exceeds bcrypt limit of 72 bytes, truncating")
+        password_bytes = password_bytes[:72]
+        password = password_bytes.decode('utf-8', errors='ignore')
+
     hashed = pwd_context.hash(password)
     logger.debug("Password hashed successfully")
     return hashed
@@ -42,6 +54,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verify a password against its hash
 
+    Bcrypt has a maximum password length of 72 bytes. We truncate the password
+    to 72 bytes for verification, matching the behavior in hash_password.
+
     Args:
         plain_password: Plain text password
         hashed_password: Bcrypt hashed password
@@ -49,6 +64,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True if password matches, False otherwise
     """
+    # Convert to bytes to properly truncate at 72 bytes boundary
+    password_bytes = plain_password.encode('utf-8')
+
+    # Bcrypt can only handle passwords up to 72 bytes
+    if len(password_bytes) > 72:
+        logger.debug(f"Password length ({len(password_bytes)} bytes) exceeds bcrypt limit, truncating for verification")
+        password_bytes = password_bytes[:72]
+        plain_password = password_bytes.decode('utf-8', errors='ignore')
+
     is_valid = pwd_context.verify(plain_password, hashed_password)
     if is_valid:
         logger.debug("Password verification successful")

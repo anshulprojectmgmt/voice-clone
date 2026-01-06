@@ -2,9 +2,21 @@
 
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth/authContext';
 
 export function EmptyState() {
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  const handleCreateStory = () => {
+    // Redirect to register page if not authenticated
+    if (!isAuthenticated) {
+      console.log('User not authenticated, redirecting to register page');
+      router.push('/register');
+    } else {
+      router.push('/story/create');
+    }
+  };
 
   return (
     <div className="flex flex-col items-center justify-center py-20 px-4">
@@ -34,7 +46,9 @@ export function EmptyState() {
             No stories yet
           </h3>
           <p className="text-gray-600 dark:text-gray-400">
-            Start creating amazing stories with AI! Your generated stories will appear here.
+            {isAuthenticated
+              ? 'Start creating amazing stories with AI! Your generated stories will appear here.'
+              : 'Sign up to start creating amazing stories with AI!'}
           </p>
         </div>
 
@@ -42,8 +56,9 @@ export function EmptyState() {
         <Button
           variant="primary"
           size="lg"
-          onClick={() => router.push('/story/create')}
+          onClick={handleCreateStory}
           className="gap-2"
+          disabled={isLoading}
         >
           <svg
             className="w-5 h-5"
@@ -58,7 +73,7 @@ export function EmptyState() {
               d="M12 4v16m8-8H4"
             />
           </svg>
-          Create Your First Story
+          {isAuthenticated ? 'Create Your First Story' : 'Sign Up to Get Started'}
         </Button>
       </div>
     </div>

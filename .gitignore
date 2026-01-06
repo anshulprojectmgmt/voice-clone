@@ -31,6 +31,7 @@ VOICE_DURATION_OPTIMIZATION.md
 RENDER_KEEPALIVE_SYSTEM.md
 tests
 PRODUCTION_DEPLOYMENT.md
+test_bcrypt_fix.py
 
 # ============================================================================
 # Python
