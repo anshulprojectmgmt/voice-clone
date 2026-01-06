@@ -39,15 +39,21 @@ class User:
 
     def to_dict(self, include_password=False):
         """Convert to dictionary (excludes password by default)"""
+        # Convert datetime objects to strings if needed
+        def to_str(value):
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value) if value else value
+
         data = {
             'id': self.id,
             'username': self.username,
             'email': self.email,
             'is_active': self.is_active,
             'is_verified': self.is_verified,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
-            'last_login': self.last_login,
+            'created_at': to_str(self.created_at),
+            'updated_at': to_str(self.updated_at),
+            'last_login': to_str(self.last_login) if self.last_login else None,
             'metadata': self.metadata
         }
         if include_password:
@@ -97,6 +103,12 @@ class VoiceProfile:
 
     def to_dict(self):
         """Convert to dictionary"""
+        # Convert datetime objects to strings if needed
+        def to_str(value):
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value) if value else value
+
         return {
             'id': self.id,
             'user_id': self.user_id,
@@ -109,9 +121,9 @@ class VoiceProfile:
             'duration': self.duration,
             'is_default': self.is_default,
             'exaggeration': self.exaggeration,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
-            'last_used': self.last_used,
+            'created_at': to_str(self.created_at),
+            'updated_at': to_str(self.updated_at),
+            'last_used': to_str(self.last_used) if self.last_used else None,
             'usage_count': self.usage_count
         }
 
@@ -142,14 +154,20 @@ class RefreshToken:
 
     def to_dict(self):
         """Convert to dictionary"""
+        # Convert datetime objects to strings if needed
+        def to_str(value):
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value) if value else value
+
         return {
             'id': self.id,
             'user_id': self.user_id,
             'token': self.token,
-            'expires_at': self.expires_at,
-            'created_at': self.created_at,
+            'expires_at': to_str(self.expires_at),
+            'created_at': to_str(self.created_at),
             'is_revoked': self.is_revoked,
-            'revoked_at': self.revoked_at
+            'revoked_at': to_str(self.revoked_at) if self.revoked_at else None
         }
 
 
@@ -193,6 +211,12 @@ class Story:
 
     def to_dict(self):
         """Convert to dictionary"""
+        # Convert datetime objects to strings if needed
+        def to_str(value):
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value) if value else value
+
         return {
             'id': self.id,
             'title': self.title,
@@ -204,8 +228,8 @@ class Story:
             'word_count': self.word_count,
             'thumbnail_color': self.thumbnail_color,
             'preview_text': self.preview_text,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at,
+            'created_at': to_str(self.created_at),
+            'updated_at': to_str(self.updated_at),
             'audio_url': self.audio_url,
             'metadata': self.metadata
         }
