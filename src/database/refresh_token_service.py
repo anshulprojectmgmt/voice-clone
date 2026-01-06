@@ -5,10 +5,17 @@ import logging
 from typing import Optional
 from datetime import datetime, timedelta
 
-from .connection import get_db, get_cursor
+from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import RefreshToken
 
 logger = logging.getLogger(__name__)
+
+
+def _format_query(query: str) -> str:
+    """Convert SQL query placeholders for PostgreSQL compatibility"""
+    if USE_POSTGRES:
+        return query.replace('?', '%s')
+    return query
 
 
 def create_refresh_token(user_id: int, token: str, expires_days: int = 7) -> Optional[RefreshToken]:
@@ -29,13 +36,13 @@ def create_refresh_token(user_id: int, token: str, expires_days: int = 7) -> Opt
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 INSERT INTO refresh_tokens (user_id, token, expires_at)
                 VALUES (?, ?, ?)
-            """, (user_id, token, expires_at.isoformat()))
+            """), (user_id, token, expires_at.isoformat()))
 
             token_id = cursor.lastrowid
-            cursor.execute("SELECT * FROM refresh_tokens WHERE id = ?", (token_id,))
+            cursor.execute(_format_query("SELECT * FROM refresh_tokens WHERE id = ?"), (token_id,))
             row = cursor.fetchone()
 
             conn.commit()
@@ -56,7 +63,7 @@ def get_refresh_token(token: str) -> Optional[RefreshToken]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT * FROM refresh_tokens WHERE token = ?", (token,))
+            cursor.execute(_format_query("SELECT * FROM refresh_tokens WHERE token = ?"), (token,))
             row = cursor.fetchone()
 
             if row:
@@ -113,11 +120,11 @@ def revoke_token(token: str) -> bool:
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE refresh_tokens
                 SET is_revoked = 1, revoked_at = CURRENT_TIMESTAMP
                 WHERE token = ?
-            """, (token,))
+            """), (token,))
 
             conn.commit()
 
@@ -144,11 +151,11 @@ def revoke_user_tokens(user_id: int) -> int:
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE refresh_tokens
                 SET is_revoked = 1, revoked_at = CURRENT_TIMESTAMP
                 WHERE user_id = ? AND is_revoked = 0
-            """, (user_id,))
+            """), (user_id,))
 
             conn.commit()
 
@@ -193,11 +200,11 @@ def get_user_tokens_count(user_id: int) -> int:
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 SELECT COUNT(*) as count
                 FROM refresh_tokens
                 WHERE user_id = ? AND is_revoked = 0 AND expires_at > CURRENT_TIMESTAMP
-            """, (user_id,))
+            """), (user_id,))
 
             row = cursor.fetchone()
             return row['count'] if row else 0

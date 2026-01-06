@@ -5,10 +5,17 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from .connection import get_db, get_cursor
+from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import User
 
 logger = logging.getLogger(__name__)
+
+
+def _format_query(query: str) -> str:
+    """Convert SQL query placeholders for PostgreSQL compatibility"""
+    if USE_POSTGRES:
+        return query.replace('?', '%s')
+    return query
 
 
 def create_user(username: str, email: str, password_hash: str) -> Optional[User]:
@@ -27,19 +34,19 @@ def create_user(username: str, email: str, password_hash: str) -> Optional[User]
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
-                INSERT INTO users (username, email, password_hash)
-                VALUES (%s, %s, %s)
-                RETURNING id, username, email, password_hash, is_active, is_verified,
-                          created_at, updated_at, last_login, metadata
-            """ if 'postgres' in str(type(conn)).lower() else """
-                INSERT INTO users (username, email, password_hash)
-                VALUES (?, ?, ?)
-            """, (username, email, password_hash))
-
-            if 'postgres' in str(type(conn)).lower():
+            if USE_POSTGRES:
+                cursor.execute("""
+                    INSERT INTO users (username, email, password_hash)
+                    VALUES (%s, %s, %s)
+                    RETURNING id, username, email, password_hash, is_active, is_verified,
+                              created_at, updated_at, last_login, metadata
+                """, (username, email, password_hash))
                 row = cursor.fetchone()
             else:
+                cursor.execute("""
+                    INSERT INTO users (username, email, password_hash)
+                    VALUES (?, ?, ?)
+                """, (username, email, password_hash))
                 user_id = cursor.lastrowid
                 cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
                 row = cursor.fetchone()
@@ -62,7 +69,7 @@ def get_user_by_id(user_id: int) -> Optional[User]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            cursor.execute(_format_query("SELECT * FROM users WHERE id = ?"), (user_id,))
             row = cursor.fetchone()
 
             if row:
@@ -78,7 +85,7 @@ def get_user_by_username(username: str) -> Optional[User]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+            cursor.execute(_format_query("SELECT * FROM users WHERE username = ?"), (username,))
             row = cursor.fetchone()
 
             if row:
@@ -94,7 +101,7 @@ def get_user_by_email(email: str) -> Optional[User]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+            cursor.execute(_format_query("SELECT * FROM users WHERE email = ?"), (email,))
             row = cursor.fetchone()
 
             if row:
@@ -128,11 +135,11 @@ def update_last_login(user_id: int) -> bool:
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute("""
+            cursor.execute(_format_query("""
                 UPDATE users
                 SET last_login = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (user_id,))
+            """), (user_id,))
 
             conn.commit()
             return cursor.rowcount > 0
@@ -165,17 +172,19 @@ def update_user(
         updates = []
         params = []
 
+        placeholder = "%s" if USE_POSTGRES else "?"
+
         if email is not None:
-            updates.append("email = ?")
+            updates.append(f"email = {placeholder}")
             params.append(email)
         if password_hash is not None:
-            updates.append("password_hash = ?")
+            updates.append(f"password_hash = {placeholder}")
             params.append(password_hash)
         if is_active is not None:
-            updates.append("is_active = ?")
+            updates.append(f"is_active = {placeholder}")
             params.append(1 if is_active else 0)
         if is_verified is not None:
-            updates.append("is_verified = ?")
+            updates.append(f"is_verified = {placeholder}")
             params.append(1 if is_verified else 0)
 
         if not updates:
@@ -187,7 +196,7 @@ def update_user(
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+            query = f"UPDATE users SET {', '.join(updates)} WHERE id = {placeholder}"
             cursor.execute(query, params)
             conn.commit()
 
@@ -212,7 +221,7 @@ def delete_user(user_id: int) -> bool:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            cursor.execute(_format_query("DELETE FROM users WHERE id = ?"), (user_id,))
             conn.commit()
 
             deleted = cursor.rowcount > 0
