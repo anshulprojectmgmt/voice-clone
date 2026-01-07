@@ -154,24 +154,42 @@ def create_voice_profile_without_embeddings(
         with get_db() as conn:
             cursor = get_cursor(conn)
 
-            cursor.execute(_format_query("""
-                INSERT INTO voice_profiles (
-                    user_id, voice_id, name, description, file_path, embeddings_path,
-                    sample_rate, duration, exaggeration, is_default
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """), (
-                user_id, voice_id, name, description, str(new_file_path),
-                embeddings_path,  # NULL - will be computed later
-                int(sr), duration, exaggeration,
-                1 if is_default else 0
-            ))
+            if USE_POSTGRES:
+                cursor.execute("""
+                    INSERT INTO voice_profiles (
+                        user_id, voice_id, name, description, file_path, embeddings_path,
+                        sample_rate, duration, exaggeration, is_default
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    user_id, voice_id, name, description, str(new_file_path),
+                    embeddings_path,  # NULL - will be computed later
+                    int(sr), duration, exaggeration,
+                    is_default  # PostgreSQL boolean
+                ))
+            else:
+                cursor.execute("""
+                    INSERT INTO voice_profiles (
+                        user_id, voice_id, name, description, file_path, embeddings_path,
+                        sample_rate, duration, exaggeration, is_default
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id, voice_id, name, description, str(new_file_path),
+                    embeddings_path,  # NULL - will be computed later
+                    int(sr), duration, exaggeration,
+                    1 if is_default else 0  # SQLite integer
+                ))
 
             # Get the created voice profile
-            voice_profile_id = cursor.lastrowid
-            cursor.execute(_format_query("SELECT * FROM voice_profiles WHERE id = ?"), (voice_profile_id,))
-            row = cursor.fetchone()
+            if USE_POSTGRES:
+                # PostgreSQL: use voice_id instead of lastrowid
+                cursor.execute("SELECT * FROM voice_profiles WHERE voice_id = %s", (voice_id,))
+            else:
+                voice_profile_id = cursor.lastrowid
+                cursor.execute("SELECT * FROM voice_profiles WHERE id = ?", (voice_profile_id,))
 
+            row = cursor.fetchone()
             conn.commit()
 
             if row:
