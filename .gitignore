@@ -32,6 +32,8 @@ RENDER_KEEPALIVE_SYSTEM.md
 tests
 PRODUCTION_DEPLOYMENT.md
 test_bcrypt_fix.py
+fix_db_sequences.py
+fix_sequences.sql
 
 # ============================================================================
 # Python

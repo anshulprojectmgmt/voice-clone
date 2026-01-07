@@ -148,11 +148,18 @@ def create_voice_profile(
         if is_default:
             with get_db() as conn:
                 cursor = get_cursor(conn)
-                cursor.execute(_format_query("""
-                    UPDATE voice_profiles
-                    SET is_default = 0
-                    WHERE user_id = ?
-                """), (user_id,))
+                if USE_POSTGRES:
+                    cursor.execute("""
+                        UPDATE voice_profiles
+                        SET is_default = FALSE
+                        WHERE user_id = %s
+                    """, (user_id,))
+                else:
+                    cursor.execute("""
+                        UPDATE voice_profiles
+                        SET is_default = 0
+                        WHERE user_id = ?
+                    """, (user_id,))
                 conn.commit()
 
         # Insert into database
@@ -328,11 +335,18 @@ def get_default_voice(user_id: int) -> Optional[VoiceProfile]:
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute(_format_query("""
-                SELECT * FROM voice_profiles
-                WHERE user_id = ? AND is_default = 1
-                LIMIT 1
-            """), (user_id,))
+            if USE_POSTGRES:
+                cursor.execute("""
+                    SELECT * FROM voice_profiles
+                    WHERE user_id = %s AND is_default = TRUE
+                    LIMIT 1
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    SELECT * FROM voice_profiles
+                    WHERE user_id = ? AND is_default = 1
+                    LIMIT 1
+                """, (user_id,))
             row = cursor.fetchone()
 
             if row:
@@ -350,18 +364,32 @@ def set_default_voice(user_id: int, voice_id: str) -> bool:
             cursor = get_cursor(conn)
 
             # Unset current default
-            cursor.execute(_format_query("""
-                UPDATE voice_profiles
-                SET is_default = 0
-                WHERE user_id = ?
-            """), (user_id,))
+            if USE_POSTGRES:
+                cursor.execute("""
+                    UPDATE voice_profiles
+                    SET is_default = FALSE
+                    WHERE user_id = %s
+                """, (user_id,))
 
-            # Set new default
-            cursor.execute(_format_query("""
-                UPDATE voice_profiles
-                SET is_default = 1
-                WHERE user_id = ? AND voice_id = ?
-            """), (user_id, voice_id))
+                # Set new default
+                cursor.execute("""
+                    UPDATE voice_profiles
+                    SET is_default = TRUE
+                    WHERE user_id = %s AND voice_id = %s
+                """, (user_id, voice_id))
+            else:
+                cursor.execute("""
+                    UPDATE voice_profiles
+                    SET is_default = 0
+                    WHERE user_id = ?
+                """, (user_id,))
+
+                # Set new default
+                cursor.execute("""
+                    UPDATE voice_profiles
+                    SET is_default = 1
+                    WHERE user_id = ? AND voice_id = ?
+                """, (user_id, voice_id))
 
             conn.commit()
             return cursor.rowcount > 0

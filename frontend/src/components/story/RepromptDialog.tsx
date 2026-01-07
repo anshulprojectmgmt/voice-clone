@@ -6,6 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Helper to get auth headers from localStorage
+function getAuthHeaders(): HeadersInit {
+  const tokensStr = localStorage.getItem('auth_tokens');
+  if (!tokensStr) return {};
+
+  try {
+    const tokens = JSON.parse(tokensStr);
+    return {
+      'Authorization': `Bearer ${tokens.access_token}`,
+    };
+  } catch {
+    return {};
+  }
+}
+
 interface RepromptDialogProps {
   storyId: string;
   originalText: string;
@@ -50,6 +65,7 @@ export function RepromptDialog({ storyId, originalText, onClose, onSuccess }: Re
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           story_id: storyId,
