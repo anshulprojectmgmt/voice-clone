@@ -111,8 +111,17 @@ async def upload_voice_sample(
             # Embeddings will be computed lazily on first TTS request
             logger.info(f"Creating voice profile for '{voice_name}' (embeddings will be computed on first use)...")
 
-            # Check if we're on Render (production) or local
-            is_production = os.getenv("RENDER") == "true" or os.getenv("RAILWAY_ENVIRONMENT") is not None
+            # Check if we're on a cloud platform (Render, Railway, Heroku, etc.)
+            # These platforms have limited memory, so we skip embeddings computation
+            is_production = (
+                os.getenv("RENDER") is not None or
+                os.getenv("RAILWAY_ENVIRONMENT") is not None or
+                os.getenv("DYNO") is not None or  # Heroku
+                os.getenv("FLY_APP_NAME") is not None or  # Fly.io
+                os.getenv("PORT") is not None  # Most cloud platforms set PORT
+            )
+
+            logger.info(f"Environment check - is_production: {is_production}, RENDER: {os.getenv('RENDER')}, PORT: {os.getenv('PORT')}")
 
             if is_production:
                 # Production: Skip embeddings, compute on first use

@@ -132,15 +132,22 @@ class StoryService:
     @staticmethod
     def get_story(story_id: str) -> Optional[Story]:
         """Get story by ID"""
-        ph = get_placeholder()
-        with get_db() as conn:
-            cursor = get_cursor(conn)
-            cursor.execute(f"SELECT * FROM stories WHERE id = {ph}", (story_id,))
-            row = cursor.fetchone()
+        try:
+            ph = get_placeholder()
+            with get_db() as conn:
+                cursor = get_cursor(conn)
+                cursor.execute(f"SELECT * FROM stories WHERE id = {ph}", (story_id,))
+                row = cursor.fetchone()
 
-        if row:
-            return Story.from_db_row(row)
-        return None
+            if row:
+                logger.debug(f"Story found in database: {story_id}")
+                return Story.from_db_row(row)
+            else:
+                logger.debug(f"Story not found in database: {story_id}")
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching story {story_id}: {e}", exc_info=True)
+            return None
 
     @staticmethod
     def list_stories(

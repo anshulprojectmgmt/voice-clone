@@ -253,8 +253,11 @@ async def reprompt_story(request: RepromptRequest, user: dict = Depends(get_curr
         logger.info(f"Instruction: {request.instruction}")
 
         # Verify story exists
+        logger.debug(f"Looking up story with ID: {request.story_id}")
         story = StoryService.get_story(request.story_id)
+
         if not story:
+            logger.warning(f"Story not found in database: {request.story_id}")
             raise HTTPException(
                 status_code=404,
                 detail="Story not found"
@@ -262,7 +265,7 @@ async def reprompt_story(request: RepromptRequest, user: dict = Depends(get_curr
 
         # NOTE: Stories don't currently track user_id in database schema
         # Ownership check skipped - will be added when user_id column is added to stories table
-        logger.debug(f"Story found: {story.id}, proceeding with reprompt")
+        logger.info(f"Story found: {story.id}, title: {story.title[:50]}...")
 
         generator = get_story_generator()
 
@@ -342,5 +345,9 @@ async def reprompt_story(request: RepromptRequest, user: dict = Depends(get_curr
             created_at=datetime.now().isoformat()
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (404, 403, etc.)
+        raise
     except Exception as e:
+        logger.error(f"Unexpected error in reprompt: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to reprompt story: {str(e)}")
