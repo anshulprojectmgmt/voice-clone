@@ -107,22 +107,36 @@ async def upload_voice_sample(
 
             logger.info(f"Voice file saved to temp: {temp_path}")
 
-            # Get TTS model for embeddings computation
-            tts_model = get_tts_model()
+            # OPTIMIZATION: Skip embeddings computation on upload to avoid Render memory limits
+            # Embeddings will be computed lazily on first TTS request
+            logger.info(f"Creating voice profile for '{voice_name}' (embeddings will be computed on first use)...")
 
-            # Create voice profile with cached embeddings
-            # THIS IS THE CRITICAL OPTIMIZATION: Pre-compute embeddings ONCE
-            logger.info(f"Creating voice profile for '{voice_name}' (will cache embeddings)...")
+            # Check if we're on Render (production) or local
+            is_production = os.getenv("RENDER") == "true" or os.getenv("RAILWAY_ENVIRONMENT") is not None
 
-            voice = voice_service.create_voice_profile(
-                user_id=user["id"],
-                name=voice_name,
-                audio_file_path=str(temp_path),
-                tts_model=tts_model,
-                exaggeration=exaggeration,
-                description=description,
-                is_default=is_default,
-            )
+            if is_production:
+                # Production: Skip embeddings, compute on first use
+                logger.info("Production environment detected - skipping embeddings computation to conserve memory")
+                voice = voice_service.create_voice_profile_without_embeddings(
+                    user_id=user["id"],
+                    name=voice_name,
+                    audio_file_path=str(temp_path),
+                    exaggeration=exaggeration,
+                    description=description,
+                    is_default=is_default,
+                )
+            else:
+                # Local: Compute embeddings immediately
+                tts_model = get_tts_model()
+                voice = voice_service.create_voice_profile(
+                    user_id=user["id"],
+                    name=voice_name,
+                    audio_file_path=str(temp_path),
+                    tts_model=tts_model,
+                    exaggeration=exaggeration,
+                    description=description,
+                    is_default=is_default,
+                )
 
             if not voice:
                 raise HTTPException(
@@ -131,8 +145,13 @@ async def upload_voice_sample(
                 )
 
             logger.info(f"✓ Voice profile created: {voice.voice_id}")
-            logger.info(f"  - Embeddings cached at: {voice.embeddings_path}")
-            logger.info(f"  - Future TTS requests will load from cache (<50ms)")
+
+            embeddings_cached = voice.embeddings_path is not None
+            if embeddings_cached:
+                logger.info(f"  - Embeddings cached at: {voice.embeddings_path}")
+                logger.info(f"  - Future TTS requests will load from cache (<50ms)")
+            else:
+                logger.info(f"  - Embeddings will be computed on first TTS request")
 
             return VoiceUploadResponse(
                 voice_id=voice.voice_id,
@@ -140,7 +159,7 @@ async def upload_voice_sample(
                 sample_url=f"/output/voice_samples/{Path(voice.file_path).name}",
                 duration=voice.duration,
                 sample_rate=voice.sample_rate,
-                embeddings_cached=True,  # NEW: Indicates embeddings are pre-computed
+                embeddings_cached=embeddings_cached,  # Indicates if embeddings are pre-computed
                 is_default=voice.is_default,
             )
 

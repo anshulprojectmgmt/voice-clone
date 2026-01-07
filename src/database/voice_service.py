@@ -80,6 +80,114 @@ def crop_audio_to_limit(audio_path: str, max_duration: float = MAX_VOICE_DURATIO
     return cropped_path
 
 
+def create_voice_profile_without_embeddings(
+    user_id: int,
+    name: str,
+    audio_file_path: str,
+    exaggeration: float = 0.3,
+    description: Optional[str] = None,
+    is_default: bool = False
+) -> Optional[VoiceProfile]:
+    """
+    Create voice profile WITHOUT computing embeddings (memory-efficient for production)
+
+    Embeddings will be computed lazily on first TTS request.
+    This avoids memory spikes on Render/limited memory environments.
+
+    Args:
+        user_id: User who owns this voice
+        name: Display name for voice
+        audio_file_path: Path to source audio file
+        exaggeration: Emotion exaggeration (0.0-1.0)
+        description: Optional description
+        is_default: Whether this is user's default voice
+
+    Returns:
+        VoiceProfile object if successful, None otherwise
+    """
+    try:
+        voice_id = str(uuid.uuid4())
+
+        # Process audio file (crop if needed)
+        logger.info(f"Processing audio file: {audio_file_path}")
+        processed_audio_path = crop_audio_to_limit(audio_file_path, MAX_VOICE_DURATION)
+
+        # Get audio duration and sample rate
+        import librosa
+        audio, sr = librosa.load(processed_audio_path, sr=None)
+        duration = len(audio) / sr
+
+        # Validate minimum duration
+        if duration < MIN_VOICE_DURATION:
+            logger.error(f"Audio too short: {duration:.2f}s (minimum {MIN_VOICE_DURATION}s required)")
+            raise ValueError(f"Voice sample must be at least {MIN_VOICE_DURATION} seconds long")
+
+        # Copy processed audio to permanent location
+        file_extension = Path(processed_audio_path).suffix
+        new_file_path = VOICE_SAMPLES_DIR / f"{voice_id}{file_extension}"
+        shutil.copy2(processed_audio_path, new_file_path)
+        logger.info(f"Copied audio file to {new_file_path} (duration: {duration:.2f}s)")
+
+        # Skip embeddings computation - will be done on first use
+        logger.info(f"Skipping embeddings computation for '{name}' (will compute on first TTS request)")
+        embeddings_path = None
+
+        # If this is set as default, unset other defaults for this user
+        if is_default:
+            with get_db() as conn:
+                cursor = get_cursor(conn)
+                if USE_POSTGRES:
+                    cursor.execute("""
+                        UPDATE voice_profiles
+                        SET is_default = FALSE
+                        WHERE user_id = %s
+                    """, (user_id,))
+                else:
+                    cursor.execute("""
+                        UPDATE voice_profiles
+                        SET is_default = 0
+                        WHERE user_id = ?
+                    """, (user_id,))
+                conn.commit()
+
+        # Insert into database (embeddings_path will be NULL)
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+
+            cursor.execute(_format_query("""
+                INSERT INTO voice_profiles (
+                    user_id, voice_id, name, description, file_path, embeddings_path,
+                    sample_rate, duration, exaggeration, is_default
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """), (
+                user_id, voice_id, name, description, str(new_file_path),
+                embeddings_path,  # NULL - will be computed later
+                int(sr), duration, exaggeration,
+                1 if is_default else 0
+            ))
+
+            # Get the created voice profile
+            voice_profile_id = cursor.lastrowid
+            cursor.execute(_format_query("SELECT * FROM voice_profiles WHERE id = ?"), (voice_profile_id,))
+            row = cursor.fetchone()
+
+            conn.commit()
+
+            if row:
+                voice = VoiceProfile.from_db_row(row)
+                logger.info(f"Created voice profile: {name} (id={voice.id}, voice_id={voice_id}, embeddings=lazy)")
+                return voice
+
+            return None
+    except Exception as e:
+        logger.error(f"Failed to create voice profile '{name}': {e}")
+        # Cleanup on failure
+        if 'new_file_path' in locals() and Path(new_file_path).exists():
+            Path(new_file_path).unlink()
+        return None
+
+
 def create_voice_profile(
     user_id: int,
     name: str,
