@@ -96,7 +96,7 @@ async def startup_event():
 
     Initializes:
     1. Database schema (creates tables if not exist)
-    2. Default voice pre-caching (eliminates 400-1100ms overhead on first use)
+    2. Default voice pre-caching (only if not using RunPod - eliminates 400-1100ms overhead on first use)
     """
     logger.info("=" * 60)
     logger.info("Application Startup")
@@ -110,17 +110,22 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
 
-    # Pre-cache default voice
-    logger.info("Pre-caching default voice (this improves first TTS request by 10-20x)...")
-    try:
-        voice = init_default_voice()
-        if voice:
-            logger.info("✓ Default voice pre-cached successfully")
-        else:
-            logger.warning("! Default voice not initialized (will be cached on first use)")
-    except Exception as e:
-        logger.error(f"Failed to pre-cache default voice: {e}")
-        logger.warning("  TTS will still work, but first request will be slower")
+    # Pre-cache default voice (skip on Vercel/serverless platforms using RunPod)
+    use_runpod = os.getenv("USE_RUNPOD", "false").lower() in ("true", "1", "yes")
+
+    if use_runpod:
+        logger.info("Using RunPod for TTS - skipping local model initialization")
+    else:
+        logger.info("Pre-caching default voice (this improves first TTS request by 10-20x)...")
+        try:
+            voice = init_default_voice()
+            if voice:
+                logger.info("✓ Default voice pre-cached successfully")
+            else:
+                logger.warning("! Default voice not initialized (will be cached on first use)")
+        except Exception as e:
+            logger.error(f"Failed to pre-cache default voice: {e}")
+            logger.warning("  TTS will still work, but first request will be slower")
 
     logger.info("=" * 60)
     logger.info("Startup complete - Ready to accept requests")

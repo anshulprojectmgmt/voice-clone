@@ -4,9 +4,12 @@ Story Service - Business logic for story database operations
 from typing import List, Optional, Dict
 import uuid
 import json
+import logging
 from datetime import datetime
 from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import Story
+
+logger = logging.getLogger(__name__)
 
 
 # Theme color mapping

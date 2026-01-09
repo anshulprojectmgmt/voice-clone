@@ -31,6 +31,10 @@ VOICE_DURATION_OPTIMIZATION.md
 RENDER_KEEPALIVE_SYSTEM.md
 tests
 PRODUCTION_DEPLOYMENT.md
+VERCEL_DEPLOYMENT.md
+QUICK_START_VERCEL.md
+VERCEL_FIX_SUMMARY.md
+vercel.json
 test_bcrypt_fix.py
 fix_db_sequences.py
 fix_sequences.sql
