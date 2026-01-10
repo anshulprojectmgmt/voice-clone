@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from ..models.tts import (
     TTSGenerateRequest,
@@ -59,6 +60,10 @@ tasks: Dict[str, Dict] = {}
 
 # Initialize synthesizer (could be AudioSynthesizer or RunPodTTSClient)
 synthesizer = None
+
+# Thread pool for blocking I/O operations (RunPod API calls)
+# This prevents blocking the FastAPI event loop during audio generation
+executor = ThreadPoolExecutor(max_workers=4)
 
 def get_synthesizer():
     """Get TTS synthesizer - uses RunPodTTSClient if torch is not available"""
@@ -341,6 +346,15 @@ async def generate_audio_task(task_id: str, request: TTSGenerateRequest, user_id
         tasks[task_id]["progress"] = 0
 
 
+async def run_generation_in_thread(task_id: str, request: TTSGenerateRequest, user_id: Optional[int]):
+    """
+    Wrapper to run generate_audio_task in a thread pool executor.
+    This prevents blocking the FastAPI event loop during long-running RunPod API calls.
+    """
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(executor, generate_audio_task, task_id, request, user_id)
+
+
 @router.post("/generate", response_model=TTSGenerateResponse)
 async def generate_audio(
     request: TTSGenerateRequest,
@@ -377,7 +391,8 @@ async def generate_audio(
         }
 
         # Start background task with user_id for voice access control
-        background_tasks.add_task(generate_audio_task, task_id, request, user_id)
+        # Run in thread pool to avoid blocking the event loop during RunPod API calls
+        background_tasks.add_task(run_generation_in_thread, task_id, request, user_id)
         logger.info(f"Background task queued for task {task_id}, returning response")
 
         return TTSGenerateResponse(
