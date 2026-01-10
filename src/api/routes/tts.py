@@ -149,9 +149,12 @@ def convert_to_mono(audio_path: Path) -> Path:
     return processed_path
 
 
-async def generate_audio_task(task_id: str, request: TTSGenerateRequest, user_id: Optional[int] = None):
+def generate_audio_task(task_id: str, request: TTSGenerateRequest, user_id: Optional[int] = None):
     """
     Background task to generate audio with cached embeddings optimization
+
+    Note: This is a synchronous function (not async) because it does blocking I/O (RunPod API calls).
+    It runs in a thread pool executor to avoid blocking the FastAPI event loop.
 
     OPTIMIZATION: Loads pre-computed voice embeddings from database (<50ms)
     instead of recomputing them every time (400-1100ms).
