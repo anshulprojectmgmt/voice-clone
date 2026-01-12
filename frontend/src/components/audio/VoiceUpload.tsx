@@ -14,6 +14,7 @@ interface VoiceUploadProps {
 export function VoiceUpload({ onVoiceUploaded, showDefaultOption = true }: VoiceUploadProps) {
   const { isAuthenticated } = useAuth();
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -52,8 +53,17 @@ export function VoiceUpload({ onVoiceUploaded, showDefaultOption = true }: Voice
     }
 
     setIsUploading(true);
+    setUploadProgress(0);
     setError(null);
     setSuccess(null);
+
+    // Simulate progress for better UX
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev >= 90) return 90; // Hold at 90% until upload completes
+        return prev + 10;
+      });
+    }, 200);
 
     try {
       const result = await uploadVoiceSample(
@@ -63,6 +73,9 @@ export function VoiceUpload({ onVoiceUploaded, showDefaultOption = true }: Voice
         exaggeration,
         isDefault
       );
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       setSuccess(
         `Voice uploaded successfully! ${result.embeddings_cached ? '✓ Cached for fast use' : ''}`
@@ -78,8 +91,11 @@ export function VoiceUpload({ onVoiceUploaded, showDefaultOption = true }: Voice
         setExaggeration(0.3);
         setIsDefault(false);
         setSuccess(null);
+        setUploadProgress(0);
       }, 3000);
     } catch (err) {
+      clearInterval(progressInterval);
+      setUploadProgress(0);
       setError(err instanceof Error ? err.message : 'Failed to upload voice sample');
     } finally {
       setIsUploading(false);
@@ -271,6 +287,32 @@ export function VoiceUpload({ onVoiceUploaded, showDefaultOption = true }: Voice
               </label>
             </div>
           </div>
+
+          {/* Progress Bar */}
+          {isUploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+                <span>Uploading voice sample...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              {uploadProgress < 90 && (
+                <p className="text-xs text-gray-500 dark:text-gray-500">
+                  Processing audio file...
+                </p>
+              )}
+              {uploadProgress >= 90 && uploadProgress < 100 && (
+                <p className="text-xs text-gray-500 dark:text-gray-500">
+                  Saving voice profile...
+                </p>
+              )}
+            </div>
+          )}
 
           <Button
             onClick={handleUpload}

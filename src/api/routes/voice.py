@@ -209,7 +209,7 @@ async def get_voice_library(user: dict = Depends(get_current_user)):
             VoiceLibraryItem(
                 voice_id=voice.voice_id,
                 name=voice.name,
-                uploaded_at=voice.created_at,
+                uploaded_at=voice.created_at.isoformat() if isinstance(voice.created_at, datetime) else voice.created_at,
                 sample_url=f"/output/voice_samples/{Path(voice.file_path).name}",
                 duration=voice.duration,
             )
