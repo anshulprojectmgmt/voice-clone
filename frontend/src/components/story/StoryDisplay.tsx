@@ -75,9 +75,9 @@ export function StoryDisplay({ story, onEdit, onGenerateAudio, onReprompt }: Sto
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-h-0">
         <div className="prose prose-gray dark:prose-invert max-w-none">
-          <div className="whitespace-pre-wrap leading-relaxed">
+          <div className="whitespace-pre-wrap leading-relaxed text-gray-900 dark:text-gray-100 break-words">
             {story.text}
           </div>
         </div>
