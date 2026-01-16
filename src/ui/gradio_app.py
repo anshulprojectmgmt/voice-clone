@@ -5,7 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 
-from story_narrator import StoryNarrator, StoryPrompt
+from story_narrator import StoryGenerator, StoryPrompt
+
 import gradio as gr
 
 OUTPUT_DIR = ROOT / "output"
@@ -18,7 +19,7 @@ def run_generate(theme, style, tone, length, voice_file, exaggeration, temperatu
         voice_path = voice_file if voice_file else None
 
         # Use RunPod by default (reads from .env USE_RUNPOD setting)
-        narrator = StoryNarrator(llm_provider="gemini")
+        narrator = StoryGenerator(llm_provider="gemini")
 
         prompt = StoryPrompt(
             theme=theme,
