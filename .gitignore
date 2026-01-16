@@ -8,6 +8,8 @@
 *.key
 *.pem
 credentials.json
+.env.example
+.voiceclone-api.env
 
 # Render deployment
 .render/
