@@ -20,8 +20,8 @@ logger = setup_logger(__name__)
 class AudioSynthesizer:
     def __init__(
         self,
-        temperature: float = 0.8,
-        cfg_weight: float = 0.5,
+        temperature: float = 0.45,
+        cfg_weight: float = 1.05,
     ):
         self.temperature = temperature
         self.cfg_weight = cfg_weight

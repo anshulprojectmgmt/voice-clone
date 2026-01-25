@@ -38,7 +38,7 @@ def get_story_generator():
         story_generator = StoryGenerator()
     return story_generator
 
-
+# this route generate the story 
 @router.post("/generate", response_model=StoryGenerateResponse)
 async def generate_story(request: StoryGenerateRequest, user: dict = Depends(get_current_user)):
     """

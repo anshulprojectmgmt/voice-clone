@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { AudioSettings, AudioGenerationTask, VoiceSample } from '@/types/audio';
+import { create } from "zustand";
+import { AudioSettings, AudioGenerationTask, VoiceSample } from "@/types/audio";
 
 interface AudioStore {
   settings: AudioSettings;
@@ -33,6 +33,11 @@ export const useAudioStore = create<AudioStore>((set) => ({
     set((state) => ({
       settings: { ...state.settings, ...newSettings },
     })),
+  // setGeneratedAudio: (url: string) =>
+  //   set({
+  //     audioUrl: url,
+  //     isPlaying: false,
+  //   }),
 
   setAudioUrl: (url) => set({ audioUrl: url }),
 
@@ -49,9 +54,10 @@ export const useAudioStore = create<AudioStore>((set) => ({
 
   selectVoice: (voice) => set({ selectedVoice: voice }),
 
-  reset: () => set({
-    audioUrl: null,
-    currentTask: null,
-    selectedVoice: null,
-  }),
+  reset: () =>
+    set({
+      audioUrl: null,
+      currentTask: null,
+      selectedVoice: null,
+    }),
 }));

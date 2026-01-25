@@ -297,3 +297,30 @@ def tts_generate_segment(text, output_path, audio_prompt_path, device='cpu'):
     import torchaudio
     torchaudio.save(output_path, wav, model.sr)
     return output_path
+
+def extract_speaker_embedding(self, wav_path: str):
+    """
+    Extract speaker embedding from a reference audio file.
+    This does NOT modify internal conditionals.
+    """
+    import librosa
+    from .models.s3tokenizer import S3_SR, S3GEN_SR
+
+    # Load and resample
+    s3gen_ref_wav, _ = librosa.load(wav_path, sr=S3GEN_SR)
+    ref_16k_wav = librosa.resample(
+        s3gen_ref_wav,
+        orig_sr=S3GEN_SR,
+        target_sr=S3_SR
+    )
+
+    # Voice encoder embedding
+    ve_embed = self.ve.embeds_from_wavs(
+        [ref_16k_wav],
+        sample_rate=S3_SR
+    )
+
+    # Mean + CPU
+    ve_embed = torch.from_numpy(ve_embed).mean(axis=0).cpu()
+
+    return ve_embed

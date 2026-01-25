@@ -3,7 +3,7 @@
  * Handles all API calls for story management and dashboard
  */
 
-const API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1`;
+const API_BASE = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/v1`;
 
 export interface Story {
   id: string;
@@ -47,16 +47,16 @@ export interface CreateSimilarResponse {
  */
 export async function fetchStories(
   limit: number = 20,
-  offset: number = 0
+  offset: number = 0,
 ): Promise<StoriesListResponse> {
   const response = await fetch(
     `${API_BASE}/stories?limit=${limit}&offset=${offset}`,
     {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-    }
+    },
   );
 
   if (!response.ok) {
@@ -71,9 +71,9 @@ export async function fetchStories(
  */
 export async function fetchStory(storyId: string): Promise<Story> {
   const response = await fetch(`${API_BASE}/stories/${storyId}`, {
-    method: 'GET',
+    method: "GET",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
   });
 
@@ -89,9 +89,9 @@ export async function fetchStory(storyId: string): Promise<Story> {
  */
 export async function deleteStory(storyId: string): Promise<void> {
   const response = await fetch(`${API_BASE}/stories/${storyId}`, {
-    method: 'DELETE',
+    method: "DELETE",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
   });
 
@@ -105,24 +105,24 @@ export async function deleteStory(storyId: string): Promise<void> {
  */
 export async function createSimilarStory(
   storyId: string,
-  modificationPrompt: string
+  modificationPrompt: string,
 ): Promise<CreateSimilarResponse> {
   const response = await fetch(
     `${API_BASE}/stories/${storyId}/create-similar`,
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         modification_prompt: modificationPrompt,
       }),
-    }
+    },
   );
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Failed to create similar story');
+    throw new Error(error.detail || "Failed to create similar story");
   }
 
   return response.json();

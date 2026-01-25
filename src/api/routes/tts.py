@@ -1,436 +1,205 @@
 """
-TTS API Routes - WITH EMBEDDINGS CACHING
-
-This is a critical optimization module that:
-1. Loads pre-cached voice embeddings from database (<50ms)
-2. Falls back to recomputing only if cache miss (400-1100ms)
-3. Optionally requires authentication for user-specific voices
+TTS API Routes — JOB BASED (PRODUCTION SAFE)
+- Non-blocking
+- Progress tracking
+- Render safe
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from typing import Dict, Optional
-import uuid
-import asyncio
-from datetime import datetime
-import base64
-import os
+
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional, List, Dict
 from pathlib import Path
-import re
+import uuid
+import base64
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import re
+import io
+import threading
+import time
 
-from ..models.tts import (
-    TTSGenerateRequest,
-    TTSGenerateResponse,
-    TTSStatusResponse,
-)
-from story_narrator.text_processor import TextProcessor
+import soundfile as sf
+import numpy as np
+
 from ...auth.dependencies import get_optional_user
-from ...database import voice_service
-
-# AudioSynthesizer requires torch - make it optional
-try:
-    from story_narrator.audio_synthesizer import AudioSynthesizer
-    _has_audio_synthesizer = True
-except ImportError:
-    _has_audio_synthesizer = False
-    AudioSynthesizer = None
-
-# RunPodTTSClient doesn't require torch - use as fallback
-try:
-    from story_narrator.runpod_client import RunPodTTSClient
-    _has_runpod_client = True
-except ImportError:
-    _has_runpod_client = False
-    RunPodTTSClient = None
-
-# Set up logger
-logger = logging.getLogger(__name__)
-
-# Initialize text processor (same as Gradio)
-text_processor = TextProcessor(
-    max_chunk_length=500,  # 500 chars per chunk (not words!)
-    paragraph_pause=1.0,   # 1 second pause between paragraphs
-    sentence_pause=0.3     # 0.3 second pause between sentences
-)
+from ...database.voice_service import get_voice_by_id, increment_usage
+from ...story_narrator.runpod_client import RunPodTTSClient
 
 router = APIRouter(prefix="/api/v1/tts", tags=["tts"])
+logger = logging.getLogger(__name__)
 
-# Task storage (in production, use Redis or a database)
+OUTPUT_DIR = Path("src/output/audio")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+SAMPLE_RATE = 24000
+
+# -----------------------------
+# IN-MEMORY TASK STORE
+# (Redis later)
+# -----------------------------
 tasks: Dict[str, Dict] = {}
 
-# Initialize synthesizer (could be AudioSynthesizer or RunPodTTSClient)
-synthesizer = None
+# ============================
+# MODELS
+# ============================
 
-# Thread pool for blocking I/O operations (RunPod API calls)
-# This prevents blocking the FastAPI event loop during audio generation
-executor = ThreadPoolExecutor(max_workers=4)
+class TTSGenerateRequest(BaseModel):
+    voice_id: str
+    text: str
+    temperature: float = 0.6
+    cfg_weight: float = 0.8
 
-def get_synthesizer():
-    """Get TTS synthesizer - uses RunPodTTSClient if torch is not available"""
-    global synthesizer
 
-    if synthesizer is None:
-        # Prefer RunPodTTSClient if available (doesn't need torch)
-        if _has_runpod_client:
-            try:
-                logger.info("Initializing RunPodTTSClient for TTS (torch not required)")
-                synthesizer = RunPodTTSClient()
-                logger.info("RunPodTTSClient initialized successfully")
-            except ValueError as e:
-                logger.error(f"Failed to initialize RunPodTTSClient: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"RunPod configuration error: {str(e)}. Please set RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID environment variables."
-                )
-        elif _has_audio_synthesizer:
-            logger.info("Using AudioSynthesizer with RunPod")
-            synthesizer = AudioSynthesizer(
-                device="cpu",
-                use_runpod=True
-            )
+class TTSGenerateResponse(BaseModel):
+    task_id: str
+    message: str
+
+
+class TTSStatusResponse(BaseModel):
+    status: str
+    progress: int
+    audio_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ============================
+# TEXT PROCESSING
+# ============================
+
+def split_into_sentences(text: str) -> List[str]:
+    return re.split(r'(?<=[.!?])\s+', text.strip())
+
+
+def create_chunks(text: str, max_chars: int = 240) -> List[str]:
+    sentences = split_into_sentences(text)
+    chunks, current = [], ""
+
+    for s in sentences:
+        if len(current) + len(s) > max_chars:
+            chunks.append(current)
+            current = s
         else:
-            raise HTTPException(
-                status_code=500,
-                detail="No TTS synthesizer available. Install torch for AudioSynthesizer or configure RunPod for RunPodTTSClient."
-            )
+            current = f"{current} {s}" if current else s
 
-    return synthesizer
+    if current:
+        chunks.append(current)
 
-
-def sanitize_text_for_tts(text: str) -> str:
-    """
-    Sanitize text to make it more suitable for TTS synthesis.
-    Removes special characters and formatting that might confuse the model.
-    """
-    # Replace smart quotes with regular quotes
-    text = text.replace('"', '"').replace('"', '"')
-    text = text.replace(''', "'").replace(''', "'")
-
-    # Replace em dashes and en dashes with regular hyphens
-    text = text.replace('—', '-').replace('–', '-')
-
-    # Replace ellipsis with three periods
-    text = text.replace('…', '...')
-
-    # Remove multiple spaces
-    text = re.sub(r'\s+', ' ', text)
-
-    # Remove any remaining non-ASCII characters that might cause issues
-    # But keep common punctuation
-    text = re.sub(r'[^\x00-\x7F]+', '', text)
-
-    return text.strip()
+    return chunks
 
 
-def convert_to_mono(audio_path: Path) -> Path:
-    """
-    Convert audio file to mono and resample to 24kHz (Chatterbox TTS requirement).
-    Returns path to processed audio file.
-    """
-    import librosa
-    import soundfile as sf
-    import numpy as np
+# ============================
+# AUDIO HELPERS
+# ============================
 
-    # Read audio file and resample to 24kHz
-    target_sr = 24000  # Chatterbox TTS expects 24kHz
-    audio, sr = sf.read(str(audio_path))
-
-    # Convert to mono if stereo (2 channels)
-    if len(audio.shape) > 1 and audio.shape[1] == 2:
-        audio = np.mean(audio, axis=1)
-
-    # Resample to target sample rate if needed
-    if sr != target_sr:
-        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
-
-    # Save processed audio
-    processed_path = audio_path.with_stem(f"{audio_path.stem}_processed")
-    sf.write(str(processed_path), audio, target_sr)
-    return processed_path
+def decode_wav(audio_bytes: bytes) -> np.ndarray:
+    data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+    if sr != SAMPLE_RATE:
+        raise RuntimeError(f"Sample rate mismatch: {sr}")
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    return data
 
 
-def generate_audio_task(task_id: str, request: TTSGenerateRequest, user_id: Optional[int] = None):
-    """
-    Background task to generate audio with cached embeddings optimization
+def silence(seconds: float) -> np.ndarray:
+    return np.zeros(int(seconds * SAMPLE_RATE), dtype=np.float32)
 
-    Note: This is a synchronous function (not async) because it does blocking I/O (RunPod API calls).
-    It runs in a thread pool executor to avoid blocking the FastAPI event loop.
 
-    OPTIMIZATION: Loads pre-computed voice embeddings from database (<50ms)
-    instead of recomputing them every time (400-1100ms).
-    """
+# ============================
+# BACKGROUND JOB
+# ============================
+
+def run_tts_job(task_id: str, voice, text: str, temperature: float, cfg_weight: float):
     try:
         tasks[task_id]["status"] = "processing"
-        tasks[task_id]["progress"] = 10
+        tasks[task_id]["progress"] = 5
 
-        synth = get_synthesizer()
+        voice_path = Path(voice.file_path)
+        ref_audio_b64 = base64.b64encode(voice_path.read_bytes()).decode()
 
-        # Get voice profile from database
-        voice_profile = None
-        voice_sample_path = None
+        chunks = create_chunks(text)
+        total = len(chunks)
+        logger.info(f"TTS chunks: {total}")
 
-        if request.voiceSample:
-            # Check if it's the default voice
-            if request.voiceSample == "default":
-                # Get default voice from database (pre-cached on startup)
-                voice_profile = voice_service.get_default_voice(user_id)
-                if not voice_profile:
-                    tasks[task_id]["status"] = "failed"
-                    tasks[task_id]["error"] = "No default voice available. Please upload a voice sample first."
-                    return
-                voice_sample_path = Path(voice_profile.file_path)
-                logger.info(f"Using default voice: {voice_profile.voice_id}")
-                tasks[task_id]["progress"] = 20
+        runpod = RunPodTTSClient()
+        audio_segments: List[np.ndarray] = []
 
-            # Check if it's a voice ID (UUID format) or base64 data
-            elif len(request.voiceSample) < 100:  # Likely a voice ID
-                # Look up voice profile from database
-                voice_profile = voice_service.get_voice_by_id(request.voiceSample)
+        for i, chunk in enumerate(chunks, 1):
+            logger.info(f"Synth chunk {i}/{total}")
 
-                if not voice_profile:
-                    tasks[task_id]["status"] = "failed"
-                    tasks[task_id]["error"] = f"Voice sample not found: {request.voiceSample}"
-                    return
-
-                # Verify ownership if user_id provided
-                if user_id and voice_profile.user_id != user_id:
-                    # Check if it's a system voice (user_id=1)
-                    SYSTEM_USER_ID = int(os.getenv("SYSTEM_USER_ID", "1"))
-                    if voice_profile.user_id != SYSTEM_USER_ID:
-                        tasks[task_id]["status"] = "failed"
-                        tasks[task_id]["error"] = "Access denied: This voice belongs to another user"
-                        return
-
-                voice_sample_path = Path(voice_profile.file_path)
-                logger.info(f"Using voice from database: {voice_profile.voice_id}")
-                tasks[task_id]["progress"] = 20
-
-            else:
-                # It's base64 encoded data (legacy support - no caching)
-                try:
-                    logger.warning("Base64 voice data provided - skipping cache (will be slower)")
-                    voice_data = base64.b64decode(request.voiceSample)
-                    voice_sample_path = Path("src/output") / f"voice_sample_{task_id}.wav"
-                    voice_sample_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(voice_sample_path, "wb") as f:
-                        f.write(voice_data)
-                    tasks[task_id]["progress"] = 20
-                except Exception as e:
-                    tasks[task_id]["status"] = "failed"
-                    tasks[task_id]["error"] = f"Failed to decode voice sample: {str(e)}"
-                    return
-
-        # If no voice sample provided, use default
-        if not voice_profile and not voice_sample_path:
-            voice_profile = voice_service.get_default_voice(user_id)
-            if not voice_profile:
-                tasks[task_id]["status"] = "failed"
-                tasks[task_id]["error"] = "No voice samples available. Please upload a voice sample first."
-                return
-            voice_sample_path = Path(voice_profile.file_path)
-            logger.info(f"Using default voice: {voice_profile.voice_id}")
-
-        tasks[task_id]["progress"] = 30
-
-        # Generate audio
-        output_dir = Path("src/output")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"narration_{task_id}.wav"
-
-        tasks[task_id]["progress"] = 40
-
-        # Process text
-        logger.info(f"Processing text ({len(request.text)} chars)...")
-        processed = text_processor.process_story(request.text)
-        chunks = processed["chunks"]
-        text_chunks = [c.text for c in chunks]
-        pause_durations = [c.pause_after for c in chunks]
-
-        logger.info(f"Text processed into {len(text_chunks)} chunks")
-
-        tasks[task_id]["progress"] = 50
-
-        # Use different synthesis methods based on synthesizer type
-        # Check by class name to avoid issues when RunPodTTSClient is None
-        is_runpod = _has_runpod_client and type(synth).__name__ == 'RunPodTTSClient'
-
-        if is_runpod:
-            # RunPodTTSClient: synthesize each chunk and combine
-            logger.info("Using RunPodTTSClient for synthesis")
-            audio_segments = []
-
-            for i, chunk_text in enumerate(text_chunks):
-                logger.info(f"Synthesizing chunk {i+1}/{len(text_chunks)}")
-                audio_data = synth.synthesize_text(
-                    text=chunk_text,
-                    voice_sample_path=str(voice_sample_path),
-                    exaggeration=request.exaggeration,
-                    temperature=request.temperature,
-                    cfg_weight=request.cfgWeight
-                )
-                audio_segments.append(audio_data)
-                tasks[task_id]["progress"] = 50 + int(40 * (i + 1) / len(text_chunks))
-
-            # Combine audio segments and save
-            with open(output_path, 'wb') as f:
-                for segment in audio_segments:
-                    f.write(segment)
-
-            result = {"output_path": str(output_path)}
-
-        else:
-            # AudioSynthesizer: use CACHED EMBEDDINGS for 10-20x speedup
-            logger.info("Using AudioSynthesizer for synthesis")
-
-            # CRITICAL OPTIMIZATION: Load cached embeddings instead of recomputing
-            if voice_profile and voice_profile.embeddings_path:
-                # Try to load cached embeddings (FAST PATH <50ms)
-                logger.info(f"Attempting to load cached embeddings for voice {voice_profile.voice_id}")
-                cached_conds = voice_service.load_cached_embeddings(
-                    voice_profile.voice_id,
-                    request.exaggeration
-                )
-
-                if cached_conds:
-                    # SUCCESS: Use cached embeddings (10-20x faster than prepare_conditionals)
-                    logger.info(f"✓ Using cached embeddings (<50ms) - 10-20x speedup!")
-                    synth.tts_model.conds = cached_conds
-
-                    # Update voice usage statistics
-                    voice_service.increment_usage(voice_profile.voice_id)
-                else:
-                    # Cache miss (different exaggeration or corrupted cache)
-                    logger.warning(f"Cache miss for exaggeration={request.exaggeration}, recomputing...")
-                    synth.tts_model.prepare_conditionals(
-                        str(voice_sample_path),
-                        request.exaggeration
-                    )
-
-                    # Re-cache with new exaggeration value
-                    try:
-                        voice_service.recache_voice_embeddings(
-                            voice_profile.voice_id,
-                            synth.tts_model,
-                            request.exaggeration
-                        )
-                        logger.info(f"✓ Embeddings re-cached for exaggeration={request.exaggeration}")
-                    except Exception as e:
-                        logger.error(f"Failed to re-cache embeddings: {e}")
-            else:
-                # No cached embeddings available (base64 upload or legacy voice)
-                logger.warning("No cached embeddings available, using slow path (400-1100ms)")
-                synth.set_voice(
-                    str(voice_sample_path),
-                    exaggeration=request.exaggeration
-                )
-
-            result = synth.synthesize_and_save(
-                text_chunks=text_chunks,
-                output_path=str(output_path),
-                pause_durations=pause_durations,
-                format="wav",
-                show_progress=False
+            audio_bytes = runpod.synthesize_with_reference_audio(
+                text=chunk,
+                ref_audio_b64=ref_audio_b64,
+                temperature=temperature,
+                cfg_weight=cfg_weight,
             )
 
-        tasks[task_id]["progress"] = 90
+            audio_segments.append(decode_wav(audio_bytes))
+            audio_segments.append(silence(0.35))
 
-        # Generate URL for the audio file
-        audio_url = f"/output/narration_{task_id}.wav"
+            progress = int(5 + (85 * i / total))
+            tasks[task_id]["progress"] = progress
+
+        full_audio = np.concatenate(audio_segments, axis=0)
+
+        output_path = OUTPUT_DIR / f"{task_id}.wav"
+        sf.write(output_path, full_audio, SAMPLE_RATE, subtype="PCM_16")
+
+        increment_usage(voice.voice_id)
 
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["progress"] = 100
-        tasks[task_id]["audio_url"] = audio_url
-        tasks[task_id]["completed_at"] = datetime.now().isoformat()
-        tasks[task_id]["duration"] = result.get("duration_seconds", 0)
+        tasks[task_id]["audio_url"] = f"/output/audio/{output_path.name}"
 
     except Exception as e:
+        logger.exception("TTS job failed")
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["error"] = str(e)
-        tasks[task_id]["progress"] = 0
 
 
-async def run_generation_in_thread(task_id: str, request: TTSGenerateRequest, user_id: Optional[int]):
-    """
-    Wrapper to run generate_audio_task in a thread pool executor.
-    This prevents blocking the FastAPI event loop during long-running RunPod API calls.
-    """
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(executor, generate_audio_task, task_id, request, user_id)
-
+# ============================
+# API ENDPOINTS
+# ============================
 
 @router.post("/generate", response_model=TTSGenerateResponse)
-async def generate_audio(
+async def generate_tts(
     request: TTSGenerateRequest,
     background_tasks: BackgroundTasks,
     user: Optional[dict] = Depends(get_optional_user),
 ):
-    """
-    Generate audio narration for a story
+    user_id = user["id"] if user else None
 
-    Optional authentication:
-        - If authenticated: can access user's private voices + system voices
-        - If not authenticated: can only access system voices (user_id=1)
+    voice = get_voice_by_id(request.voice_id)
+    if not voice:
+        raise HTTPException(status_code=404, detail="Voice not found")
 
-    OPTIMIZATION: Uses cached voice embeddings for 10-20x faster processing
-    """
-    try:
-        user_id = user["id"] if user else None
-        username = user["username"] if user else "anonymous"
+    if user_id and voice.user_id not in (user_id, 1):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-        logger.info(f"Audio generation request from {username} for story {request.storyId}")
-        logger.info(f"Voice: {request.voiceSample}, Exaggeration: {request.exaggeration}")
+    task_id = str(uuid.uuid4())
 
-        # Generate unique task ID
-        task_id = str(uuid.uuid4())
-        logger.info(f"Generated task ID: {task_id}")
+    tasks[task_id] = {
+        "status": "queued",
+        "progress": 0,
+    }
 
-        # Initialize task
-        tasks[task_id] = {
-            "status": "queued",
-            "progress": 0,
-            "created_at": datetime.now().isoformat(),
-            "story_id": request.storyId,
-            "user_id": user_id,
-        }
+    background_tasks.add_task(
+        run_tts_job,
+        task_id,
+        voice,
+        request.text,
+        request.temperature,
+        request.cfg_weight,
+    )
 
-        # Start background task with user_id for voice access control
-        # Run in thread pool to avoid blocking the event loop during RunPod API calls
-        background_tasks.add_task(run_generation_in_thread, task_id, request, user_id)
-        logger.info(f"Background task queued for task {task_id}, returning response")
-
-        return TTSGenerateResponse(
-            task_id=task_id,
-            message="Audio generation started"
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to start audio generation: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start audio generation: {str(e)}")
+    return TTSGenerateResponse(
+        task_id=task_id,
+        message="Audio generation started",
+    )
 
 
 @router.get("/status/{task_id}", response_model=TTSStatusResponse)
-async def get_task_status(task_id: str):
-    """
-    Get the status of an audio generation task
-    """
-    if task_id not in tasks:
+async def get_tts_status(task_id: str):
+    task = tasks.get(task_id)
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    task = tasks[task_id]
-
-    # Calculate estimated time remaining
-    estimated_time = None
-    if task["status"] == "processing" and task["progress"] > 0:
-        # Rough estimate: assume 2 minutes total, calculate based on progress
-        total_time = 120  # seconds
-        elapsed_percentage = task["progress"] / 100
-        if elapsed_percentage > 0:
-            estimated_time = int(total_time * (1 - elapsed_percentage))
-
-    return TTSStatusResponse(
-        status=task["status"],
-        progress=task["progress"],
-        estimated_time=estimated_time,
-        audio_url=task.get("audio_url"),
-        error=task.get("error"),
-    )
+    return TTSStatusResponse(**task)

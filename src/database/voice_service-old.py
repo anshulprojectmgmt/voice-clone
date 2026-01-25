@@ -78,9 +78,12 @@ def create_voice_profile(
     user_id: int,
     name: str,
     audio_file_path: str,
+    speaker_embedding: List[float],
+    exaggeration: float = 0.3,
     description: Optional[str] = None,
     is_default: bool = False,
-):
+) -> Optional[VoiceProfile]:
+
     try:
         voice_id = str(uuid.uuid4())
 
@@ -91,15 +94,21 @@ def create_voice_profile(
         audio, sr = librosa.load(processed_audio_path, sr=None)
         duration = len(audio) / sr
 
+        if duration < MIN_VOICE_DURATION:
+            raise ValueError("Voice sample too short")
+
         new_file_path = VOICE_SAMPLES_DIR / f"{voice_id}{Path(processed_audio_path).suffix}"
         shutil.copy2(processed_audio_path, new_file_path)
 
         with get_db() as conn:
             cursor = get_cursor(conn)
 
+            # Clear existing default if needed
             if is_default:
                 cursor.execute(
-                    _format_query("UPDATE voice_profiles SET is_default = FALSE WHERE user_id = ?"),
+                    _format_query(
+                        "UPDATE voice_profiles SET is_default = FALSE WHERE user_id = ?"
+                    ),
                     (user_id,),
                 )
 
@@ -107,9 +116,10 @@ def create_voice_profile(
                 _format_query("""
                     INSERT INTO voice_profiles (
                         user_id, voice_id, name, description,
-                        file_path, sample_rate, duration, is_default
+                        file_path, speaker_embedding,
+                        sample_rate, duration, exaggeration, is_default
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """),
                 (
                     user_id,
@@ -117,8 +127,10 @@ def create_voice_profile(
                     name,
                     description,
                     str(new_file_path),
+                    json.dumps(speaker_embedding),
                     int(sr),
                     duration,
+                    exaggeration,
                     is_default,
                 ),
             )
@@ -135,7 +147,6 @@ def create_voice_profile(
     except Exception as e:
         logger.error(f"Failed to create voice profile: {e}")
         return None
-
 
 
 # --------------------------------------------------

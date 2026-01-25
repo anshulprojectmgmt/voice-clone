@@ -72,8 +72,8 @@ class StoryNarrator:
         story_text: str,
         voice_id: str,
         output_path: str,
-        temperature: float = 0.8,
-        cfg_weight: float = 0.5,
+        temperature: float = 0.45,
+        cfg_weight: float = 0.55,
     ) -> Dict:
 
         # 🚫 NEVER log raw story text
