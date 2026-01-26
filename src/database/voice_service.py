@@ -16,6 +16,7 @@ from datetime import datetime
 
 from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import VoiceProfile
+from ..services import download_voice_from_s3
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def create_voice_profile(
 
         # 🔥 FIX: handle local vs S3
         if audio_file_path.startswith("http"):
-            local_audio_path = download_voice_from_s3(audio_file_path)
+           local_audio_path = download_voice_from_s3(audio_file_path)
         else:
             local_audio_path = audio_file_path
 
