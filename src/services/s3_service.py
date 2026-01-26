@@ -3,6 +3,7 @@ import os
 import uuid
 import tempfile
 from typing import BinaryIO
+from urllib.parse import urlparse
 AWS_REGION = os.getenv("AWS_REGION")
 AWS_BUCKET = os.getenv("AWS_S3_BUCKET")
 
@@ -17,7 +18,10 @@ def download_voice_from_s3(s3_url: str) -> str:
     """
     Downloads S3 file to a temp location and returns local path
     """
-    key = s3_url.split(f"{AWS_BUCKET}.s3.{AWS_REGION}.amazonaws.com/")[-1]
+    parsed = urlparse(s3_url)
+
+    # ✅ SAFE key extraction
+    key = parsed.path.lstrip("/")  # voices/uuid.wav
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     s3.download_fileobj(AWS_BUCKET, key, tmp)
