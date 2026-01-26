@@ -77,43 +77,26 @@ def crop_audio_to_limit(audio_path: str, max_duration: float = MAX_VOICE_DURATIO
 def create_voice_profile(
     user_id: int,
     name: str,
-    audio_file_path: str,  # S3 URL
+    audio_file_path: str,
     description: Optional[str] = None,
     is_default: bool = False,
 ):
     try:
-        import uuid
-        import os
-        import librosa
-        from pathlib import Path
-        from src.services.s3_service import download_voice_from_s3
-
         voice_id = str(uuid.uuid4())
 
-        # --------------------------------------------------
-        # 1. Download S3 audio to temp file
-        # --------------------------------------------------
-        local_audio_path = download_voice_from_s3(audio_file_path)
+        # 🔥 FIX: handle local vs S3
+        if audio_file_path.startswith("http"):
+            local_audio_path = download_voice_from_s3(audio_file_path)
+        else:
+            local_audio_path = audio_file_path
 
-        # --------------------------------------------------
-        # 2. Process audio LOCALLY
-        # --------------------------------------------------
         processed_audio_path = crop_audio_to_limit(local_audio_path)
         normalize_audio(processed_audio_path)
 
+        import librosa
         audio, sr = librosa.load(processed_audio_path, sr=None)
         duration = len(audio) / sr
 
-        # --------------------------------------------------
-        # 3. Cleanup temp files
-        # --------------------------------------------------
-        os.remove(local_audio_path)
-        if processed_audio_path != local_audio_path:
-            os.remove(processed_audio_path)
-
-        # --------------------------------------------------
-        # 4. Save DB record (S3 URL ONLY)
-        # --------------------------------------------------
         with get_db() as conn:
             cursor = get_cursor(conn)
 
@@ -126,29 +109,21 @@ def create_voice_profile(
                 )
 
             cursor.execute(
-                _format_query(
-                    """
+                _format_query("""
                     INSERT INTO voice_profiles (
-                        user_id,
-                        voice_id,
-                        name,
-                        description,
-                        file_path,
-                        sample_rate,
-                        duration,
-                        is_default
+                        user_id, voice_id, name, description,
+                        file_path, sample_rate, duration, is_default
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                ),
+                """),
                 (
                     user_id,
                     voice_id,
                     name,
                     description,
-                    audio_file_path,  # ✅ S3 URL stored
+                    audio_file_path,  # store ORIGINAL path (local OR S3)
                     int(sr),
-                    float(duration),
+                    duration,
                     is_default,
                 ),
             )
@@ -157,14 +132,16 @@ def create_voice_profile(
                 _format_query("SELECT * FROM voice_profiles WHERE voice_id = ?"),
                 (voice_id,),
             )
+
             row = cursor.fetchone()
             conn.commit()
 
             return VoiceProfile.from_db_row(row) if row else None
 
     except Exception as e:
-        logger.exception("Failed to create voice profile")
+        logger.error("Failed to create voice profile", exc_info=True)
         return None
+
 
 
 
