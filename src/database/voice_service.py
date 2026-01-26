@@ -16,7 +16,7 @@ from datetime import datetime
 
 from .connection import get_db, get_cursor, USE_POSTGRES
 from .models import VoiceProfile
-from ..services import download_voice_from_s3
+from ..services.s3_service import download_voice_from_s3
 
 logger = logging.getLogger(__name__)
 
