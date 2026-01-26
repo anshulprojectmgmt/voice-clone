@@ -5,6 +5,7 @@ TEXT + REFERENCE AUDIO (STABLE CONTRACT)
 
 import os
 import base64
+import time
 import requests
 from dotenv import load_dotenv
 from .logger import setup_logger
@@ -36,9 +37,9 @@ class RunPodTTSClient:
         self,
         text: str,
         ref_audio_b64: str,
-        exaggeration: float = 0.7,
-        temperature: float = 0.8,
-        cfg_weight: float = 0.5,
+        exaggeration: float = 0.3,
+        temperature: float = 0.85,
+        cfg_weight: float = 0.2,
     ) -> bytes:
         """
         Returns RAW WAV BYTES
@@ -69,16 +70,37 @@ class RunPodTTSClient:
         response.raise_for_status()
 
         result = response.json()
-        status = result.get("status")
 
-        if status != "COMPLETED":
+        # ✅ ALWAYS extract job_id immediately
+        job_id = result.get("id")
+        if not job_id:
+            raise RuntimeError(f"RunPod response missing job id: {result}")
+
+        # ✅ HANDLE QUEUE / PROGRESS (cold starts)
+        if result.get("status") in ("IN_QUEUE", "IN_PROGRESS"):
+            for _ in range(30):  # ~36 seconds max
+                time.sleep(1.2)
+
+                status_resp = requests.get(
+                    f"https://api.runpod.ai/v2/{self.endpoint_id}/status/{job_id}",
+                    headers=self.headers,
+                    timeout=30,
+                )
+                status_resp.raise_for_status()
+                result = status_resp.json()
+
+                if result.get("status") == "COMPLETED":
+                    break
+
+        # ❌ STILL NOT DONE → REAL FAILURE
+        if result.get("status") != "COMPLETED":
             raise RuntimeError(f"RunPod job not completed: {result}")
 
         output = result.get("output")
         if not output or "audio_b64" not in output:
             raise RuntimeError(f"Invalid RunPod output: {result}")
 
-        # Debug timing (optional but useful)
+        # Optional debug timing
         exec_time = result.get("executionTime", 0) / 1000
         delay_time = result.get("delayTime", 0) / 1000
         logger.info(

@@ -2,6 +2,7 @@
 TTS API Routes — JOB BASED (PRODUCTION SAFE)
 - Non-blocking
 - Progress tracking
+- AWS S3 compatible
 - Render safe
 """
 
@@ -14,8 +15,7 @@ import base64
 import logging
 import re
 import io
-import threading
-import time
+import requests
 
 import soundfile as sf
 import numpy as np
@@ -32,21 +32,21 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SAMPLE_RATE = 24000
 
-# -----------------------------
-# IN-MEMORY TASK STORE
-# (Redis later)
-# -----------------------------
+# --------------------------------------------------
+# IN-MEMORY TASK STORE (Redis later)
+# --------------------------------------------------
 tasks: Dict[str, Dict] = {}
 
-# ============================
+# ==================================================
 # MODELS
-# ============================
+# ==================================================
 
 class TTSGenerateRequest(BaseModel):
     voice_id: str
     text: str
-    temperature: float = 0.6
-    cfg_weight: float = 0.8
+    temperature: float = 0.85
+    cfg_weight: float = 0.2
+    exaggeration: float = 0.3
 
 
 class TTSGenerateResponse(BaseModel):
@@ -61,12 +61,16 @@ class TTSStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
-# ============================
+# ==================================================
 # TEXT PROCESSING
-# ============================
+# ==================================================
 
 def split_into_sentences(text: str) -> List[str]:
-    return re.split(r'(?<=[.!?])\s+', text.strip())
+    return [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", text.strip())
+        if s.strip()
+    ]
 
 
 def create_chunks(text: str, max_chars: int = 240) -> List[str]:
@@ -86,9 +90,21 @@ def create_chunks(text: str, max_chars: int = 240) -> List[str]:
     return chunks
 
 
-# ============================
+# ==================================================
 # AUDIO HELPERS
-# ============================
+# ==================================================
+
+def load_voice_bytes(path_or_url: str) -> bytes:
+    """
+    Load voice audio from local disk OR S3 URL
+    """
+    if path_or_url.startswith("http"):
+        resp = requests.get(path_or_url, timeout=30)
+        resp.raise_for_status()
+        return resp.content
+
+    return Path(path_or_url).read_bytes()
+
 
 def decode_wav(audio_bytes: bytes) -> np.ndarray:
     data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
@@ -103,17 +119,26 @@ def silence(seconds: float) -> np.ndarray:
     return np.zeros(int(seconds * SAMPLE_RATE), dtype=np.float32)
 
 
-# ============================
+# ==================================================
 # BACKGROUND JOB
-# ============================
+# ==================================================
 
-def run_tts_job(task_id: str, voice, text: str, temperature: float, cfg_weight: float):
+def run_tts_job(
+    task_id: str,
+    voice,
+    text: str,
+    temperature: float,
+    cfg_weight: float,
+    exaggeration: float,
+):
     try:
         tasks[task_id]["status"] = "processing"
         tasks[task_id]["progress"] = 5
 
-        voice_path = Path(voice.file_path)
-        ref_audio_b64 = base64.b64encode(voice_path.read_bytes()).decode()
+        # 🔥 Load reference voice (S3 or local)
+        ref_audio_b64 = base64.b64encode(
+            load_voice_bytes(voice.file_path)
+        ).decode()
 
         chunks = create_chunks(text)
         total = len(chunks)
@@ -128,6 +153,7 @@ def run_tts_job(task_id: str, voice, text: str, temperature: float, cfg_weight: 
             audio_bytes = runpod.synthesize_with_reference_audio(
                 text=chunk,
                 ref_audio_b64=ref_audio_b64,
+                exaggeration=exaggeration,
                 temperature=temperature,
                 cfg_weight=cfg_weight,
             )
@@ -135,8 +161,7 @@ def run_tts_job(task_id: str, voice, text: str, temperature: float, cfg_weight: 
             audio_segments.append(decode_wav(audio_bytes))
             audio_segments.append(silence(0.35))
 
-            progress = int(5 + (85 * i / total))
-            tasks[task_id]["progress"] = progress
+            tasks[task_id]["progress"] = int(5 + (85 * i / total))
 
         full_audio = np.concatenate(audio_segments, axis=0)
 
@@ -155,9 +180,9 @@ def run_tts_job(task_id: str, voice, text: str, temperature: float, cfg_weight: 
         tasks[task_id]["error"] = str(e)
 
 
-# ============================
+# ==================================================
 # API ENDPOINTS
-# ============================
+# ==================================================
 
 @router.post("/generate", response_model=TTSGenerateResponse)
 async def generate_tts(
@@ -188,6 +213,7 @@ async def generate_tts(
         request.text,
         request.temperature,
         request.cfg_weight,
+        request.exaggeration,
     )
 
     return TTSGenerateResponse(

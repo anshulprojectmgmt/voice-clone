@@ -77,48 +77,78 @@ def crop_audio_to_limit(audio_path: str, max_duration: float = MAX_VOICE_DURATIO
 def create_voice_profile(
     user_id: int,
     name: str,
-    audio_file_path: str,
+    audio_file_path: str,  # S3 URL
     description: Optional[str] = None,
     is_default: bool = False,
 ):
     try:
+        import uuid
+        import os
+        import librosa
+        from pathlib import Path
+        from src.services.s3_service import download_voice_from_s3
+
         voice_id = str(uuid.uuid4())
 
-        processed_audio_path = crop_audio_to_limit(audio_file_path)
+        # --------------------------------------------------
+        # 1. Download S3 audio to temp file
+        # --------------------------------------------------
+        local_audio_path = download_voice_from_s3(audio_file_path)
+
+        # --------------------------------------------------
+        # 2. Process audio LOCALLY
+        # --------------------------------------------------
+        processed_audio_path = crop_audio_to_limit(local_audio_path)
         normalize_audio(processed_audio_path)
 
-        import librosa
         audio, sr = librosa.load(processed_audio_path, sr=None)
         duration = len(audio) / sr
 
-        new_file_path = VOICE_SAMPLES_DIR / f"{voice_id}{Path(processed_audio_path).suffix}"
-        shutil.copy2(processed_audio_path, new_file_path)
+        # --------------------------------------------------
+        # 3. Cleanup temp files
+        # --------------------------------------------------
+        os.remove(local_audio_path)
+        if processed_audio_path != local_audio_path:
+            os.remove(processed_audio_path)
 
+        # --------------------------------------------------
+        # 4. Save DB record (S3 URL ONLY)
+        # --------------------------------------------------
         with get_db() as conn:
             cursor = get_cursor(conn)
 
             if is_default:
                 cursor.execute(
-                    _format_query("UPDATE voice_profiles SET is_default = FALSE WHERE user_id = ?"),
+                    _format_query(
+                        "UPDATE voice_profiles SET is_default = FALSE WHERE user_id = ?"
+                    ),
                     (user_id,),
                 )
 
             cursor.execute(
-                _format_query("""
+                _format_query(
+                    """
                     INSERT INTO voice_profiles (
-                        user_id, voice_id, name, description,
-                        file_path, sample_rate, duration, is_default
+                        user_id,
+                        voice_id,
+                        name,
+                        description,
+                        file_path,
+                        sample_rate,
+                        duration,
+                        is_default
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """),
+                    """
+                ),
                 (
                     user_id,
                     voice_id,
                     name,
                     description,
-                    str(new_file_path),
+                    audio_file_path,  # ✅ S3 URL stored
                     int(sr),
-                    duration,
+                    float(duration),
                     is_default,
                 ),
             )
@@ -133,8 +163,9 @@ def create_voice_profile(
             return VoiceProfile.from_db_row(row) if row else None
 
     except Exception as e:
-        logger.error(f"Failed to create voice profile: {e}")
+        logger.exception("Failed to create voice profile")
         return None
+
 
 
 
@@ -179,6 +210,40 @@ def get_user_voices(user_id: int) -> List[VoiceProfile]:
         )
         rows = cursor.fetchall()
         return [VoiceProfile.from_db_row(r) for r in rows]
+def get_voice_library(user_id: Optional[int]):
+    """
+    Returns:
+    - logged-in user → their voices + system voices (user_id = 1)
+    - guest → system voices only
+    """
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+
+            if user_id:
+                cursor.execute(
+                    _format_query("""
+                        SELECT * FROM voice_profiles
+                        WHERE user_id = ? OR user_id = 1
+                        ORDER BY is_default DESC, created_at DESC
+                    """),
+                    (user_id,),
+                )
+            else:
+                cursor.execute(
+                    _format_query("""
+                        SELECT * FROM voice_profiles
+                        WHERE user_id = 1
+                        ORDER BY is_default DESC, created_at DESC
+                    """)
+                )
+
+            rows = cursor.fetchall()
+            return [VoiceProfile.from_db_row(r) for r in rows]
+
+    except Exception as e:
+        logger.exception("Failed to fetch voice library")
+        return []
 
 
 # --------------------------------------------------

@@ -138,9 +138,50 @@ async def get_voice_library(user: dict = Depends(get_optional_user)):
             duration=v.duration,
             sample_rate=v.sample_rate,
             is_default=v.is_default,
-            embeddings_cached=bool(v.embeddings_path),
+            embeddings_cached=False,
         )
         for v in voices
     ]
 
     return VoiceLibraryResponse(voices=items)
+
+@router.delete("/{voice_id}")
+async def delete_voice_sample(voice_id: str, user: dict = Depends(get_current_user)):
+    """
+    Delete a voice sample from the library
+
+    Requires:
+        - Authentication (Bearer token)
+        - Voice must belong to authenticated user
+
+    Args:
+        voice_id: Voice ID to delete
+
+    Returns:
+        Success message
+    """
+    try:
+        logger.info(f"Delete voice request: {voice_id} from user {user['username']}")
+
+        # Delete voice profile (includes ownership check)
+        success = voice_service.delete_voice_profile(voice_id, user["id"])
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Voice sample not found or access denied",
+            )
+
+        logger.info(f"✓ Voice deleted: {voice_id}")
+
+        return {"message": "Voice sample deleted successfully", "voice_id": voice_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete voice sample: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete voice sample: {str(e)}",
+        )
+
