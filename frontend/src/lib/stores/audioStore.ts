@@ -20,9 +20,9 @@ interface AudioStore {
 export const useAudioStore = create<AudioStore>((set) => ({
   settings: {
     speed: 1.0,
-    exaggeration: 0.5,
+    exaggeration: 0.3,
     temperature: 0.8,
-    cfgWeight: 0.5,
+    cfgWeight: 0.2,
   },
   audioUrl: null,
   currentTask: null,
