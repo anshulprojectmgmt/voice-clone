@@ -1,5 +1,6 @@
 import boto3
 import os
+import io
 import uuid
 import tempfile
 from typing import BinaryIO
@@ -55,6 +56,13 @@ def download_voice_from_s3(s3_url: str) -> str:
 # --------------------------------------------------
 # UPLOAD TO S3
 # --------------------------------------------------
+def read_voice_bytes_from_s3(s3_url: str) -> bytes:
+    parsed = urlparse(s3_url)
+    key = parsed.path.lstrip("/")  # voices/uuid.wav
+
+    buf = io.BytesIO()
+    s3.download_fileobj(AWS_BUCKET, key, buf)
+    return buf.getvalue()
 def upload_voice_to_s3(file_obj: BinaryIO, filename: str, content_type: str) -> str:
     """
     Upload voice file to S3 and return public URL

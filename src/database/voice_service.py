@@ -78,18 +78,18 @@ def crop_audio_to_limit(audio_path: str, max_duration: float = MAX_VOICE_DURATIO
 def create_voice_profile(
     user_id: int,
     name: str,
-    audio_file_path: str,
+    audio_file_path: str,  # MUST be S3 URL
     description: Optional[str] = None,
     is_default: bool = False,
 ):
     try:
         voice_id = str(uuid.uuid4())
 
-        # 🔥 FIX: handle local vs S3
-        if audio_file_path.startswith("http"):
-           local_audio_path = download_voice_from_s3(audio_file_path)
-        else:
-            local_audio_path = audio_file_path
+        # 🔥 ALWAYS download from S3 for processing
+        if not audio_file_path.startswith("http"):
+            raise ValueError("audio_file_path must be an S3 URL")
+
+        local_audio_path = download_voice_from_s3(audio_file_path)
 
         processed_audio_path = crop_audio_to_limit(local_audio_path)
         normalize_audio(processed_audio_path)
@@ -122,7 +122,7 @@ def create_voice_profile(
                     voice_id,
                     name,
                     description,
-                    audio_file_path,  # store ORIGINAL path (local OR S3)
+                    audio_file_path,  # ✅ ALWAYS S3 URL
                     int(sr),
                     duration,
                     is_default,
@@ -137,10 +137,10 @@ def create_voice_profile(
             row = cursor.fetchone()
             conn.commit()
 
-            return VoiceProfile.from_db_row(row) if row else None
+            return VoiceProfile.from_db_row(row)
 
-    except Exception as e:
-        logger.error("Failed to create voice profile", exc_info=True)
+    except Exception:
+        logger.exception("Failed to create voice profile")
         return None
 
 

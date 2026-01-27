@@ -26,6 +26,7 @@ from ..models.voice import (
     VoiceLibraryResponse,
     VoiceLibraryItem,
 )
+from ...services.s3_service import upload_voice_to_s3
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
@@ -59,15 +60,18 @@ async def upload_voice_sample(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid audio format")
 
-    voice_path = VOICE_DIR / f"{uuid.uuid4()}{ext}"
+    # 🔥 Upload directly to S3
+    s3_url = upload_voice_to_s3(
+        file.file,
+        file.filename,
+        file.content_type or "audio/wav",
+    )
 
-    with open(voice_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
+    # 🔥 Store ONLY S3 URL in DB
     voice = voice_service.create_voice_profile(
         user_id=user["id"],
         name=name,
-        audio_file_path=str(voice_path),
+        audio_file_path=s3_url,
         is_default=is_default,
     )
 
@@ -77,12 +81,13 @@ async def upload_voice_sample(
     return VoiceUploadResponse(
         voice_id=voice.voice_id,
         name=voice.name,
-        sample_url=f"/output/voice_samples/{Path(voice.file_path).name}",
+        sample_url=s3_url,  # ✅ S3 URL
         duration=voice.duration,
         sample_rate=voice.sample_rate,
         embeddings_cached=False,
         is_default=voice.is_default,
     )
+
 
 
 # --------------------------------------------------
@@ -108,7 +113,7 @@ async def get_default_voice(user: dict = Depends(get_optional_user)):
     return VoiceUploadResponse(
         voice_id=voice.voice_id,
         name=voice.name,
-        sample_url=f"/output/voice_samples/{Path(voice.file_path).name}",
+        sample_url=voice.file_path,
         duration=voice.duration,
         sample_rate=voice.sample_rate,
         embeddings_cached=False,
@@ -134,7 +139,7 @@ async def get_voice_library(user: dict = Depends(get_optional_user)):
         VoiceLibraryItem(
             voice_id=v.voice_id,
             name=v.name,
-            sample_url=f"/output/voice_samples/{Path(v.file_path).name}",
+            sample_url=v.file_path,
             duration=v.duration,
             sample_rate=v.sample_rate,
             is_default=v.is_default,

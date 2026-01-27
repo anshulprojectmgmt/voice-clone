@@ -23,6 +23,7 @@ import numpy as np
 from ...auth.dependencies import get_optional_user
 from ...database.voice_service import get_voice_by_id, increment_usage
 from ...story_narrator.runpod_client import RunPodTTSClient
+from ...services.s3_service import read_voice_bytes_from_s3
 
 router = APIRouter(prefix="/api/v1/tts", tags=["tts"])
 logger = logging.getLogger(__name__)
@@ -95,13 +96,8 @@ def create_chunks(text: str, max_chars: int = 240) -> List[str]:
 # ==================================================
 
 def load_voice_bytes(path_or_url: str) -> bytes:
-    """
-    Load voice audio from local disk OR S3 URL
-    """
     if path_or_url.startswith("http"):
-        resp = requests.get(path_or_url, timeout=30)
-        resp.raise_for_status()
-        return resp.content
+        return read_voice_bytes_from_s3(path_or_url)
 
     return Path(path_or_url).read_bytes()
 
